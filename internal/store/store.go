@@ -63,7 +63,50 @@ func (db *DB) migrate() error {
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		);
+
+		CREATE TABLE IF NOT EXISTS users (
+			id            TEXT PRIMARY KEY,
+			email         TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role          TEXT NOT NULL DEFAULT 'admin',
+			created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
+	return err
+}
+
+// User represents a dashboard user.
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	Role         string
+}
+
+// GetUserByEmail returns a user by email, or an error if none exists.
+func (db *DB) GetUserByEmail(email string) (*User, error) {
+	var u User
+	err := db.conn.QueryRow(`
+		SELECT id, email, password_hash, role FROM users WHERE email = ?
+	`, email).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// CountUsers returns the number of registered users.
+func (db *DB) CountUsers() (int, error) {
+	var n int
+	err := db.conn.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
+	return n, err
+}
+
+// CreateUser inserts a new user with an already-hashed password.
+func (db *DB) CreateUser(u *User) error {
+	_, err := db.conn.Exec(`
+		INSERT INTO users (id, email, password_hash, role) VALUES (?, ?, ?, ?)
+	`, u.ID, u.Email, u.PasswordHash, u.Role)
 	return err
 }
 

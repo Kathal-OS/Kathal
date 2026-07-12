@@ -125,9 +125,3 @@ func (j *JWT) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// DefaultSecret returns the JWT secret from env or generates one.
-// In production, this should come from a secure config.
-func DefaultSecret() string {
-	secret := "kathal-default-secret-change-me"
-	return secret
-}

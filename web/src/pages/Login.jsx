@@ -91,7 +91,7 @@ export default function Login({ onLogin }) {
           </button>
 
           <p className="text-center text-xs text-gray-600 mt-4">
-            Default: admin@kathal.local / kathal
+            First run? Check your server logs for the generated admin credentials.
           </p>
         </form>
       </div>

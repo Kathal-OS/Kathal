@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bakeweb/kathal-os/internal/auth"
@@ -302,6 +304,9 @@ func handleDeleteApp(deps Deps) http.HandlerFunc {
 // --- Login Handler ---
 
 func handleLogin(deps Deps) http.HandlerFunc {
+	// Simple per-process rate limiter: caps failed attempts per email.
+	limiter := newLoginLimiter()
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Email    string `json:"email"`
@@ -312,17 +317,35 @@ func handleLogin(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		if req.Password != "kathal" && req.Password != "admin" {
+		email := strings.ToLower(strings.TrimSpace(req.Email))
+		if email == "" || req.Password == "" {
+			writeError(w, http.StatusBadRequest, "email and password are required")
+			return
+		}
+
+		if !limiter.allow(email) {
+			writeError(w, http.StatusTooManyRequests, "too many failed attempts, try again later")
+			return
+		}
+
+		user, err := deps.Store.GetUserByEmail(email)
+		if err != nil {
+			// Don't reveal whether the account exists.
+			auth.VerifyPassword(req.Password, dummyHash)
+			limiter.recordFailure(email)
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
 
-		email := req.Email
-		if email == "" {
-			email = "admin@kathal.local"
+		if !auth.VerifyPassword(req.Password, user.PasswordHash) {
+			limiter.recordFailure(email)
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			return
 		}
 
-		token, err := deps.JWT.GenerateToken("admin", email, "admin", 72*time.Hour)
+		limiter.recordSuccess(email)
+
+		token, err := deps.JWT.GenerateToken(user.ID, user.Email, user.Role, 72*time.Hour)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to generate token")
 			return
@@ -331,12 +354,77 @@ func handleLogin(deps Deps) http.HandlerFunc {
 		writeJSON(w, map[string]interface{}{
 			"token": token,
 			"user": map[string]string{
-				"id":    "admin",
-				"email": email,
-				"role":  "admin",
+				"id":    user.ID,
+				"email": user.Email,
+				"role":  user.Role,
 			},
 		})
 	}
+}
+
+// dummyHash is verified against when an email doesn't exist, so the
+// response time (and thus observable behavior) doesn't leak account
+// existence via early-return timing differences.
+const dummyHash = "pbkdf2-sha256$210000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+// loginLimiter is a small in-memory rate limiter for the login endpoint,
+// keyed by email. It's intentionally simple (no external deps, no
+// distributed state) — good enough to blunt naive brute-force attempts
+// against a single-instance dashboard.
+type loginLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]*loginAttempts
+}
+
+type loginAttempts struct {
+	failures int
+	lastFail time.Time
+}
+
+const (
+	maxLoginFailures = 5
+	loginLockout     = 5 * time.Minute
+)
+
+func newLoginLimiter() *loginLimiter {
+	return &loginLimiter{attempts: make(map[string]*loginAttempts)}
+}
+
+func (l *loginLimiter) allow(email string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	a, ok := l.attempts[email]
+	if !ok {
+		return true
+	}
+	if a.failures >= maxLoginFailures && time.Since(a.lastFail) < loginLockout {
+		return false
+	}
+	if time.Since(a.lastFail) >= loginLockout {
+		// Lockout window elapsed — reset.
+		delete(l.attempts, email)
+	}
+	return true
+}
+
+func (l *loginLimiter) recordFailure(email string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	a, ok := l.attempts[email]
+	if !ok {
+		a = &loginAttempts{}
+		l.attempts[email] = a
+	}
+	a.failures++
+	a.lastFail = time.Now()
+}
+
+func (l *loginLimiter) recordSuccess(email string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.attempts, email)
 }
 
 // --- Helpers ---
