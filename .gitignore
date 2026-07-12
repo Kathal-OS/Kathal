@@ -1,5 +1,6 @@
 # Binaries
-kathal
+/kathal
+/kathal.exe
 *.exe
 
 # Go
@@ -7,7 +8,6 @@ vendor/
 
 # Node
 web/node_modules/
-web/dist/
 
 # IDE
 .idea/
@@ -21,3 +21,4 @@ Thumbs.db
 # Data
 *.db
 *.db-journal
+gcm-diagnose.log
