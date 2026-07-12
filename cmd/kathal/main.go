@@ -11,15 +11,20 @@ import (
 	"github.com/bakeweb/kathal-os/internal/api"
 	"github.com/bakeweb/kathal-os/internal/auth"
 	"github.com/bakeweb/kathal-os/internal/backup"
+	"github.com/bakeweb/kathal-os/internal/compose"
 	"github.com/bakeweb/kathal-os/internal/config"
 	"github.com/bakeweb/kathal-os/internal/dbmanager"
 	"github.com/bakeweb/kathal-os/internal/docker"
+	"github.com/bakeweb/kathal-os/internal/env"
 	"github.com/bakeweb/kathal-os/internal/filemanager"
+	"github.com/bakeweb/kathal-os/internal/gitdeploy"
+	"github.com/bakeweb/kathal-os/internal/logs"
 	"github.com/bakeweb/kathal-os/internal/metrics"
+	"github.com/bakeweb/kathal-os/internal/monitoring"
+	"github.com/bakeweb/kathal-os/internal/network"
 	"github.com/bakeweb/kathal-os/internal/proxy"
 	"github.com/bakeweb/kathal-os/internal/store"
 	"github.com/bakeweb/kathal-os/internal/templates"
-	"github.com/bakeweb/kathal-os/internal/gitdeploy"
 	"github.com/bakeweb/kathal-os/internal/terminal"
 )
 
@@ -67,20 +72,30 @@ func main() {
 	templateMgr := templates.NewManager()
 	gitDeployMgr := gitdeploy.NewManager(dataDir)
 	terminalMgr := terminal.NewManager()
+	monitoringMgr := monitoring.NewManager(dockerClient)
+	logsMgr := logs.NewManager(dockerClient)
+	composeMgr := compose.NewManager(dataDir)
+	envMgr := env.NewManager(dataDir)
+	networkMgr := network.NewManager(dockerClient, dataDir)
 
 	deps := api.Deps{
-		Config:    cfg,
-		Store:     db,
-		Docker:    dockerClient,
-		Metrics:   metrics.New(dockerClient),
-		JWT:       auth.New(jwtSecret),
-		Proxy:     proxyMgr,
-		DBManager: dbMgr,
-		Files:     fileMgr,
-		Backup:    backupMgr,
-		Templates: templateMgr,
-		GitDeploy: gitDeployMgr,
-		Terminal:  terminalMgr,
+		Config:      cfg,
+		Store:       db,
+		Docker:      dockerClient,
+		Metrics:     metrics.New(dockerClient),
+		JWT:         auth.New(jwtSecret),
+		Proxy:       proxyMgr,
+		DBManager:   dbMgr,
+		Files:       fileMgr,
+		Backup:      backupMgr,
+		Templates:   templateMgr,
+		GitDeploy:   gitDeployMgr,
+		Terminal:    terminalMgr,
+		Monitoring:  monitoringMgr,
+		Logs:        logsMgr,
+		Compose:     composeMgr,
+		Env:         envMgr,
+		Network:     networkMgr,
 	}
 
 	router := api.NewRouter(deps)

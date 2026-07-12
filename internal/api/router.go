@@ -13,33 +13,43 @@ import (
 
 	"github.com/bakeweb/kathal-os/internal/auth"
 	"github.com/bakeweb/kathal-os/internal/backup"
+	"github.com/bakeweb/kathal-os/internal/compose"
 	"github.com/bakeweb/kathal-os/internal/config"
 	"github.com/bakeweb/kathal-os/internal/dbmanager"
 	"github.com/bakeweb/kathal-os/internal/docker"
+	"github.com/bakeweb/kathal-os/internal/env"
 	"github.com/bakeweb/kathal-os/internal/filemanager"
+	"github.com/bakeweb/kathal-os/internal/gitdeploy"
+	"github.com/bakeweb/kathal-os/internal/logs"
 	"github.com/bakeweb/kathal-os/internal/metrics"
+	"github.com/bakeweb/kathal-os/internal/monitoring"
+	"github.com/bakeweb/kathal-os/internal/network"
 	"github.com/bakeweb/kathal-os/internal/proxy"
 	"github.com/bakeweb/kathal-os/internal/store"
 	"github.com/bakeweb/kathal-os/internal/templates"
-	"github.com/bakeweb/kathal-os/internal/gitdeploy"
 	"github.com/bakeweb/kathal-os/internal/terminal"
 	"github.com/gorilla/mux"
 )
 
 // Deps holds all dependencies for the API.
 type Deps struct {
-	Config    *config.Config
-	Store     *store.DB
-	Docker    *docker.Client
-	Metrics   *metrics.Collector
-	JWT       *auth.JWT
-	Proxy     *proxy.Manager
-	DBManager *dbmanager.Manager
-	Files     *filemanager.Manager
-	Backup    *backup.Manager
-	Templates *templates.Manager
-	GitDeploy *gitdeploy.Manager
-	Terminal  *terminal.Manager
+	Config     *config.Config
+	Store      *store.DB
+	Docker     *docker.Client
+	Metrics    *metrics.Collector
+	JWT        *auth.JWT
+	Proxy      *proxy.Manager
+	DBManager  *dbmanager.Manager
+	Files      *filemanager.Manager
+	Backup     *backup.Manager
+	Templates  *templates.Manager
+	GitDeploy  *gitdeploy.Manager
+	Terminal   *terminal.Manager
+	Monitoring *monitoring.Manager
+	Logs       *logs.Manager
+	Compose    *compose.Manager
+	Env        *env.Manager
+	Network    *network.Manager
 }
 
 // NewRouter creates the main HTTP router.
@@ -132,11 +142,42 @@ func NewRouter(deps Deps) http.Handler {
 	api.HandleFunc("/terminal/sessions/{id}", handleDeleteTerminalSession(deps)).Methods("DELETE")
 	api.HandleFunc("/terminal/ws/{id}", handleTerminalWebSocket(deps)).Methods("GET")
 
+	// === MONITORING ===
+	api.HandleFunc("/monitoring/current", handleMonitoringCurrent(deps)).Methods("GET")
+	api.HandleFunc("/monitoring/history", handleMonitoringHistory(deps)).Methods("GET")
+
+	// === LOGS ===
+	api.HandleFunc("/logs/containers", handleListLogContainers(deps)).Methods("GET")
+	api.HandleFunc("/logs", handleGetLogs(deps)).Methods("GET")
+	api.HandleFunc("/logs/search", handleSearchLogs(deps)).Methods("POST")
+
+	// === COMPOSE ===
+	api.HandleFunc("/compose", handleListComposeProjects(deps)).Methods("GET")
+	api.HandleFunc("/compose", handleCreateComposeProject(deps)).Methods("POST")
+	api.HandleFunc("/compose/{name}", handleGetComposeProject(deps)).Methods("GET")
+	api.HandleFunc("/compose/{name}", handleUpdateComposeProject(deps)).Methods("PUT")
+	api.HandleFunc("/compose/{name}", handleDeleteComposeProject(deps)).Methods("DELETE")
+	api.HandleFunc("/compose/{name}/deploy", handleDeployComposeProject(deps)).Methods("POST")
+	api.HandleFunc("/compose/{name}/stop", handleStopComposeProject(deps)).Methods("POST")
+	api.HandleFunc("/compose/validate", handleValidateComposeConfig(deps)).Methods("POST")
+
+	// === ENVIRONMENT ===
+	api.HandleFunc("/env", handleListEnv(deps)).Methods("GET")
+	api.HandleFunc("/env", handleCreateEnv(deps)).Methods("POST")
+	api.HandleFunc("/env/{key}", handleDeleteEnv(deps)).Methods("DELETE")
+
+	// === NETWORK & VOLUMES ===
+	api.HandleFunc("/network", handleListNetworks(deps)).Methods("GET")
+	api.HandleFunc("/network", handleCreateNetwork(deps)).Methods("POST")
+	api.HandleFunc("/network/{name}", handleDeleteNetwork(deps)).Methods("DELETE")
+	api.HandleFunc("/network/prune", handlePruneNetworks(deps)).Methods("POST")
+	api.HandleFunc("/volumes", handleListVolumes(deps)).Methods("GET")
+	api.HandleFunc("/volumes", handleCreateVolume(deps)).Methods("POST")
+	api.HandleFunc("/volumes/{name}", handleDeleteVolume(deps)).Methods("DELETE")
+	api.HandleFunc("/volumes/prune", handlePruneVolumes(deps)).Methods("POST")
+
 	// Login (public — no JWT required).
 	api.HandleFunc("/login", handleLogin(deps)).Methods("POST")
-
-	// Serve static files (React build) — catch-all for frontend routes.
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("web/dist")))
 
 	return r
 }
@@ -1170,6 +1211,416 @@ func handleTerminalWebSocket(deps Deps) http.HandlerFunc {
 		}
 		id := mux.Vars(r)["id"]
 		deps.Terminal.HandleWebSocket(w, r, id)
+	}
+}
+
+// ==================== MONITORING HANDLERS ====================
+
+func handleMonitoringCurrent(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Monitoring == nil {
+			writeError(w, http.StatusServiceUnavailable, "monitoring not available")
+			return
+		}
+		writeJSON(w, deps.Monitoring.GetCurrent())
+	}
+}
+
+func handleMonitoringHistory(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Monitoring == nil {
+			writeError(w, http.StatusServiceUnavailable, "monitoring not available")
+			return
+		}
+		writeJSON(w, deps.Monitoring.GetHistory())
+	}
+}
+
+// ==================== LOGS HANDLERS ====================
+
+func handleListLogContainers(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Logs == nil {
+			writeJSON(w, []interface{}{})
+			return
+		}
+		containers, err := deps.Logs.ListContainers()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, containers)
+	}
+}
+
+func handleGetLogs(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Logs == nil {
+			writeError(w, http.StatusServiceUnavailable, "logs not available")
+			return
+		}
+		containerID := r.URL.Query().Get("container")
+		tail := 100
+		if t := r.URL.Query().Get("tail"); t != "" {
+			fmt.Sscanf(t, "%d", &tail)
+		}
+		filter := r.URL.Query().Get("filter")
+		
+		ctx := r.Context()
+		logs, err := deps.Logs.GetLogs(ctx, logs.LogQuery{
+			ContainerID: containerID,
+			Tail:        tail,
+			Filter:      filter,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, logs)
+	}
+}
+
+func handleSearchLogs(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Logs == nil {
+			writeError(w, http.StatusServiceUnavailable, "logs not available")
+			return
+		}
+		var req struct {
+			Container string `json:"container"`
+			Query     string `json:"query"`
+			Limit     int    `json:"limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		ctx := r.Context()
+		logs, err := deps.Logs.SearchLogs(ctx, req.Container, req.Query, req.Limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, logs)
+	}
+}
+
+// ==================== COMPOSE HANDLERS ====================
+
+func handleListComposeProjects(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeJSON(w, []interface{}{})
+			return
+		}
+		writeJSON(w, deps.Compose.ListProjects())
+	}
+}
+
+func handleCreateComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		var req struct {
+			Name   string `json:"name"`
+			Config string `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		project, err := deps.Compose.CreateProject(req.Name, req.Config)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, project)
+	}
+}
+
+func handleGetComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		project, ok := deps.Compose.GetProject(name)
+		if !ok {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeJSON(w, project)
+	}
+}
+
+func handleUpdateComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		var req struct {
+			Config string `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		project, err := deps.Compose.UpdateProject(name, req.Config)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, project)
+	}
+}
+
+func handleDeleteComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		if err := deps.Compose.DeleteProject(name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{"status": "deleted"})
+	}
+}
+
+func handleDeployComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		project, err := deps.Compose.DeployProject(name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, project)
+	}
+}
+
+func handleStopComposeProject(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		if err := deps.Compose.StopProject(name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{"status": "stopped"})
+	}
+}
+
+func handleValidateComposeConfig(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Compose == nil {
+			writeError(w, http.StatusServiceUnavailable, "compose not available")
+			return
+		}
+		var req struct {
+			Config string `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		config, err := deps.Compose.ValidateConfig(req.Config)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, config)
+	}
+}
+
+// ==================== ENV HANDLERS ====================
+
+func handleListEnv(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Env == nil {
+			writeJSON(w, []interface{}{})
+			return
+		}
+		writeJSON(w, deps.Env.ListGlobal())
+	}
+}
+
+func handleCreateEnv(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Env == nil {
+			writeError(w, http.StatusServiceUnavailable, "env not available")
+			return
+		}
+		var req struct {
+			Key         string `json:"key"`
+			Value       string `json:"value"`
+			Description string `json:"description"`
+			Secret      bool   `json:"secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		deps.Env.SetGlobal(req.Key, req.Value, req.Description, req.Secret)
+		writeJSON(w, map[string]string{"status": "created"})
+	}
+}
+
+func handleDeleteEnv(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Env == nil {
+			writeError(w, http.StatusServiceUnavailable, "env not available")
+			return
+		}
+		key := mux.Vars(r)["key"]
+		deps.Env.DeleteGlobal(key)
+		writeJSON(w, map[string]string{"status": "deleted"})
+	}
+}
+
+// ==================== NETWORK & VOLUME HANDLERS ====================
+
+func handleListNetworks(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeJSON(w, []interface{}{})
+			return
+		}
+		networks, err := deps.Network.ListNetworks()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, networks)
+	}
+}
+
+func handleCreateNetwork(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		var req network.NetworkCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		network, err := deps.Network.CreateNetwork(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, network)
+	}
+}
+
+func handleDeleteNetwork(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		if err := deps.Network.DeleteNetwork(name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{"status": "deleted"})
+	}
+}
+
+func handlePruneNetworks(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		count, err := deps.Network.PruneNetworks()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]int64{"networks_deleted": count})
+	}
+}
+
+func handleListVolumes(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeJSON(w, []interface{}{})
+			return
+		}
+		volumes, err := deps.Network.ListVolumes()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, volumes)
+	}
+}
+
+func handleCreateVolume(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		var req network.VolumeCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+		volume, err := deps.Network.CreateVolume(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, volume)
+	}
+}
+
+func handleDeleteVolume(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		name := mux.Vars(r)["name"]
+		if err := deps.Network.DeleteVolume(name, false); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{"status": "deleted"})
+	}
+}
+
+func handlePruneVolumes(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Network == nil {
+			writeError(w, http.StatusServiceUnavailable, "network not available")
+			return
+		}
+		reclaimed, err := deps.Network.PruneVolumes()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]int64{"space_reclaimed_bytes": reclaimed})
 	}
 }
 

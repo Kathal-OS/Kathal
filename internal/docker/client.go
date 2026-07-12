@@ -61,12 +61,79 @@ type SystemInfo struct {
 
 // Status holds the full system status (Docker + OS).
 type Status struct {
-	DockerAvailable bool         `json:"dockerAvailable"`
-	DockerVersion   string       `json:"dockerVersion,omitempty"`
-	DockerInfo      *SystemInfo  `json:"dockerInfo,omitempty"`
-	Platform        string       `json:"platform"`
-	OSName          string       `json:"osName"`
-	Arch            string       `json:"arch"`
+	DockerAvailable bool        `json:"dockerAvailable"`
+	DockerVersion   string      `json:"dockerVersion,omitempty"`
+	DockerInfo      *SystemInfo `json:"dockerInfo,omitempty"`
+	Platform        string      `json:"platform"`
+	OSName          string      `json:"osName"`
+	Arch            string      `json:"arch"`
+}
+
+// Network represents a Docker network
+type Network struct {
+	ID           string            `json:"Id"`
+	Name         string            `json:"Name"`
+	Driver       string            `json:"Driver"`
+	Scope        string            `json:"Scope"`
+	EnableIPv6   bool              `json:"EnableIPv6"`
+	IPAM         IPAM              `json:"IPAM"`
+	Containers   map[string]NetworkContainer `json:"Containers"`
+	Labels       map[string]string `json:"Labels"`
+	Created      string            `json:"Created"`
+	Internal     bool              `json:"Internal"`
+	Attachable   bool              `json:"Attachable"`
+	Ingress      bool              `json:"Ingress"`
+	ConfigFrom   NetworkConfigRef  `json:"ConfigFrom"`
+	ConfigOnly   bool              `json:"ConfigOnly"`
+}
+
+type NetworkContainer struct {
+	Name        string `json:"Name"`
+	EndpointID  string `json:"EndpointID"`
+	MacAddress  string `json:"MacAddress"`
+	IPv4Address string `json:"IPv4Address"`
+	IPv6Address string `json:"IPv6Address"`
+}
+
+type IPAM struct {
+	Driver  string     `json:"Driver"`
+	Options map[string]string `json:"Options"`
+	Config  []IPAMConfig `json:"Config"`
+}
+
+type IPAMConfig struct {
+	Subnet  string `json:"Subnet"`
+	Gateway string `json:"Gateway"`
+}
+
+type NetworkConfigRef struct {
+	Network string `json:"Network"`
+}
+
+// Volume represents a Docker volume
+type Volume struct {
+	Name       string            `json:"Name"`
+	Driver     string            `json:"Driver"`
+	Mountpoint string            `json:"Mountpoint"`
+	Labels     map[string]string `json:"Labels"`
+	Scope      string            `json:"Scope"`
+	Options    map[string]string `json:"Options"`
+	CreatedAt  string            `json:"CreatedAt"`
+	UsageData  *VolumeUsageData  `json:"UsageData,omitempty"`
+}
+
+type VolumeUsageData struct {
+	Size           int64 `json:"Size"`
+	RefCount       int   `json:"RefCount"`
+}
+
+type VolumeListResponse struct {
+	Volumes []Volume `json:"Volumes"`
+	Warnings []string `json:"Warnings"`
+}
+
+type NetworkListResponse struct {
+	Networks []Network `json:"Networks"` // Actually the response is just an array
 }
 
 // dockerSocket returns the platform-appropriate Docker socket path.
@@ -395,6 +462,46 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}, nil
 }
 
+// ListNetworks returns all Docker networks
+func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("Docker not available")
+	}
+
+	resp, err := c.get("/networks")
+	if err != nil {
+		return nil, fmt.Errorf("list networks: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var networks []Network
+	if err := json.NewDecoder(resp.Body).Decode(&networks); err != nil {
+		return nil, fmt.Errorf("decode networks: %w", err)
+	}
+
+	return networks, nil
+}
+
+// ListVolumes returns all Docker volumes
+func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("Docker not available")
+	}
+
+	resp, err := c.get("/volumes")
+	if err != nil {
+		return nil, fmt.Errorf("list volumes: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var volList VolumeListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&volList); err != nil {
+		return nil, fmt.Errorf("decode volumes: %w", err)
+	}
+
+	return volList.Volumes, nil
+}
+
 // --- HTTP helpers ---
 
 func (c *Client) get(path string) (*http.Response, error) {
@@ -417,6 +524,19 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return c.httpClient.Do(req)
+}
+
+// Public HTTP methods for network/volume operations
+func (c *Client) Get(path string) (*http.Response, error) {
+	return c.get(path)
+}
+
+func (c *Client) Post(path string, body io.Reader) (*http.Response, error) {
+	return c.post(path, body)
+}
+
+func (c *Client) Delete(path string) (*http.Response, error) {
+	return c.delete(path)
 }
 
 // stripDockerHeaders removes the 8-byte Docker log frame headers.

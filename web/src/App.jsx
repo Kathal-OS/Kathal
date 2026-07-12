@@ -11,6 +11,11 @@ import Backups from './pages/Backups'
 import Templates from './pages/Templates'
 import GitDeploy from './pages/GitDeploy'
 import Terminal from './pages/Terminal'
+import Monitoring from './pages/Monitoring'
+import Logs from './pages/Logs'
+import Compose from './pages/Compose'
+import Env from './pages/Env'
+import Network from './pages/Network'
 import Settings from './pages/Settings'
 
 const nav = [
@@ -24,6 +29,11 @@ const nav = [
   { to: '/templates',  icon: '🧩', label: 'Templates' },
   { to: '/git',        icon: '📦', label: 'Git Deploy' },
   { to: '/terminal',   icon: '💻', label: 'Terminal' },
+  { to: '/monitoring', icon: '📈', label: 'Monitoring' },
+  { to: '/logs',       icon: '📋', label: 'Logs' },
+  { to: '/compose',    icon: '📦', label: 'Compose' },
+  { to: '/env',        icon: '🔐', label: 'Environment' },
+  { to: '/network',    icon: '🌐', label: 'Network' },
   { to: '/settings',   icon: '⚙️', label: 'Settings' },
 ]
 
@@ -57,7 +67,6 @@ export default function App() {
     setUser(null)
   }
 
-  // Login page (no sidebar).
   if (!token) {
     return (
       <Routes>
@@ -67,7 +76,6 @@ export default function App() {
     )
   }
 
-  // Main app with sidebar.
   return (
     <div className="flex h-screen bg-gray-950">
       {/* Sidebar */}
@@ -135,6 +143,11 @@ export default function App() {
           <Route path="/templates" element={<ProtectedRoute token={token}><Templates /></ProtectedRoute>} />
           <Route path="/git" element={<ProtectedRoute token={token}><GitDeploy /></ProtectedRoute>} />
           <Route path="/terminal" element={<ProtectedRoute token={token}><Terminal /></ProtectedRoute>} />
+          <Route path="/monitoring" element={<ProtectedRoute token={token}><Monitoring /></ProtectedRoute>} />
+          <Route path="/logs" element={<ProtectedRoute token={token}><Logs /></ProtectedRoute>} />
+          <Route path="/compose" element={<ProtectedRoute token={token}><Compose /></ProtectedRoute>} />
+          <Route path="/env" element={<ProtectedRoute token={token}><Env /></ProtectedRoute>} />
+          <Route path="/network" element={<ProtectedRoute token={token}><Network /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute token={token}><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
