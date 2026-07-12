@@ -3,7 +3,7 @@
 # Installs KATHAL dashboard on macOS.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/bakeweb/kathal-os/main/scripts/install-mac.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Kathal-OS/kathal/master/scripts/install-mac.sh | bash
 #   Or: bash scripts/install-mac.sh
 
 set -e
@@ -46,17 +46,14 @@ fi
 HAS_BREW=false
 if command -v brew &>/dev/null; then
     HAS_BREW=true
-    echo "  Homebrew found"
 fi
 
-echo ""
 echo "[2/5] Downloading KATHAL v$VERSION..."
 
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
 
-# Try downloading pre-built binary.
-DOWNLOAD_URL="https://github.com/bakeweb/kathal-os/releases/download/v$VERSION/kathal-$VERSION-darwin-$ARCH_NAME"
 BINARY="$INSTALL_DIR/kathal"
+DOWNLOAD_URL="https://github.com/Kathal-OS/kathal/releases/download/v$VERSION/kathal-$VERSION-darwin-$ARCH_NAME"
 
 if curl -fsSL -o "$BINARY" "$DOWNLOAD_URL" 2>/dev/null; then
     chmod +x "$BINARY"
@@ -69,30 +66,26 @@ else
             echo "  Installing Go via Homebrew..."
             brew install go
         else
-            echo "  Go not found. Install from https://go.dev/dl/"
+            echo "  Please install Go 1.22+ from https://go.dev/dl/"
             exit 1
         fi
     fi
 
     TMPDIR=$(mktemp -d)
     cd "$TMPDIR"
-    curl -fsSL "https://github.com/bakeweb/kathal-os/archive/refs/heads/main.tar.gz" | tar xz
-    cd kathal-os-*
+    curl -fsSL "https://github.com/Kathal-OS/kathal/archive/refs/heads/main.tar.gz" | tar xz
+    cd kathal-*
     go build -o "$BINARY" ./cmd/kathal
     cd /
     rm -rf "$TMPDIR"
     echo "  Built from source"
 fi
 
-echo ""
-echo "[3/5] Creating launch agent..."
+echo "[3/5] Creating LaunchAgent..."
 
-# Create launchd plist for auto-start.
-PLIST_DIR="$HOME/Library/LaunchAgents"
-PLIST_FILE="$PLIST_DIR/com.kathal.dashboard.plist"
-mkdir -p "$PLIST_DIR"
+PLIST="$HOME/Library/LaunchAgents/com.kathal.dashboard.plist"
 
-cat > "$PLIST_FILE" << PLIST
+cat > "$PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -104,7 +97,11 @@ cat > "$PLIST_FILE" << PLIST
         <string>$BINARY</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>$INSTALL_DIR</string>
+    <string>$DATA_DIR</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
     <key>EnvironmentVariables</key>
     <dict>
         <key>KATHAL_HTTP_ADDR</key>
@@ -112,49 +109,48 @@ cat > "$PLIST_FILE" << PLIST
         <key>KATHAL_DB_PATH</key>
         <string>$DATA_DIR/kathal.db</string>
     </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
     <key>StandardOutPath</key>
-    <string>$INSTALL_DIR/kathal.log</string>
+    <string>$HOME/.kathal/kathal.log</string>
     <key>StandardErrorPath</key>
-    <string>$INSTALL_DIR/kathal.log</string>
+    <string>$HOME/.kathal/kathal.error.log</string>
 </dict>
 </plist>
-PLIST
+EOF
 
-echo "  Launch agent created at $PLIST_FILE"
+launchctl load "$PLIST"
+echo "  LaunchAgent loaded"
 
-echo ""
-echo "[4/5] Copying uninstall script..."
-cat > "$INSTALL_DIR/uninstall.sh" << UNINSTALLEOF
+echo "[4/5] Creating uninstall script..."
+
+cat > "$INSTALL_DIR/uninstall.sh" << 'EOF'
 #!/bin/bash
 # KATHAL OS — macOS Uninstaller
 echo "Stopping KATHAL..."
-launchctl unload "$PLIST_FILE" 2>/dev/null || true
-rm -f "$PLIST_FILE"
-rm -rf "$INSTALL_DIR"
+launchctl unload ~/Library/LaunchAgents/com.kathal.dashboard.plist 2>/dev/null || true
+echo "Removing files..."
+rm -f ~/Library/LaunchAgents/com.kathal.dashboard.plist
+rm -rf ~/.kathal
 echo "KATHAL uninstalled."
-UNINSTALLEOF
+EOF
+
 chmod +x "$INSTALL_DIR/uninstall.sh"
 
-echo ""
 echo "[5/5] Starting KATHAL..."
 
-# Start the service.
-launchctl unload "$PLIST_FILE" 2>/dev/null || true
-launchctl load "$PLIST_FILE"
+launchctl start com.kathal.dashboard
+
+sleep 2
 
 echo ""
-echo "  KATHAL OS installed and running!"
+echo "  KATHAL OS is running!"
 echo ""
 echo "  Dashboard: http://localhost:$PORT"
 echo "  Login:     admin@kathal.local / kathal"
 echo ""
 echo "  Commands:"
-echo "    Start:   launchctl load $PLIST_FILE"
-echo "    Stop:    launchctl unload $PLIST_FILE"
-echo "    Logs:    tail -f $INSTALL_DIR/kathal.log"
+echo "    Status:  launchctl list | grep kathal"
+echo "    Stop:    launchctl stop com.kathal.dashboard"
+echo "    Start:   launchctl start com.kathal.dashboard"
+echo "    Logs:    tail -f ~/.kathal/kathal.log"
 echo "    Uninstall: bash $INSTALL_DIR/uninstall.sh"
 echo ""

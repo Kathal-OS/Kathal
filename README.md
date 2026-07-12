@@ -11,18 +11,18 @@ Like CasaOS, but simpler. One binary, one browser tab, manage everything.
 docker run -d --name kathal --restart unless-stopped \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/shruhood/kathal:latest
+  ghcr.io/Kathal-OS/kathal:latest
 ```
 Open http://localhost:8080
 
 ### Linux (Ubuntu/Debian/Fedora/Arch)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shruhood/kathal/master/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Kathal-OS/kathal/master/scripts/install.sh | sudo bash
 ```
 
 ### macOS
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shruhood/kathal/master/scripts/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kathal-OS/kathal/master/scripts/install-mac.sh | bash
 ```
 
 ### Windows
@@ -43,6 +43,18 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 - **JWT Authentication** — secure dashboard access
 - **System-Only Mode** — works without Docker for system monitoring
 - **Cross-Platform** — Windows, Linux, Mac, Docker
+- **Reverse Proxy** — auto SSL with Let's Encrypt + self-signed certs
+- **Database Management** — PostgreSQL, MySQL, MongoDB, Redis
+- **File Manager** — browse, upload, edit files
+- **Backup/Restore** — ZIP backup with export/import
+- **Service Templates** — 35+ pre-configured apps
+- **Git Deploy** — GitHub/GitLab webhook deployments
+- **Web Terminal** — xterm.js PTY terminal in browser
+- **Monitoring** — real-time metrics with history
+- **Logs** — centralized container log viewer
+- **Docker Compose** — visual YAML editor + deploy
+- **Environment Variables** — global + per-service
+- **Network/Volume Management** — Docker networks & volumes
 
 ## Architecture
 
@@ -120,6 +132,24 @@ GOOS=windows GOARCH=amd64 go build -o kathal.exe ./cmd/kathal
 | GET | `/api/v1/images` | Yes | List Docker images |
 | GET | `/api/v1/apps` | Yes | List managed apps |
 | POST | `/api/v1/apps` | Yes | Create app |
+| GET | `/api/v1/proxy` | Yes | List proxy routes |
+| POST | `/api/v1/proxy` | Yes | Create proxy route |
+| GET | `/api/v1/databases` | Yes | List databases |
+| POST | `/api/v1/databases` | Yes | Create database |
+| GET | `/api/v1/files` | Yes | List files |
+| GET | `/api/v1/backups` | Yes | List backups |
+| POST | `/api/v1/backups` | Yes | Create backup |
+| GET | `/api/v1/templates` | Yes | List service templates |
+| GET | `/api/v1/git/repos` | Yes | List git repos |
+| POST | `/api/v1/git/repos` | Yes | Add git repo |
+| GET | `/api/v1/monitoring/current` | Yes | Current metrics |
+| GET | `/api/v1/monitoring/history` | Yes | Metrics history |
+| GET | `/api/v1/logs/containers` | Yes | List log containers |
+| GET | `/api/v1/logs` | Yes | Get container logs |
+| GET | `/api/v1/compose` | Yes | List compose projects |
+| GET | `/api/v1/env` | Yes | List env vars |
+| GET | `/api/v1/network` | Yes | List networks |
+| GET | `/api/v1/volumes` | Yes | List volumes |
 
 ## Configuration
 
@@ -161,6 +191,14 @@ rm -rf ~/.kathal
 ```powershell
 Remove-Item -Recurse "$env:LOCALAPPDATA\kathal"
 ```
+
+## Links
+
+- **Official Repository**: https://github.com/Kathal-OS/kathal
+- **Issues**: https://github.com/Kathal-OS/kathal/issues
+- **Discussions**: https://github.com/Kathal-OS/kathal/discussions
+- **Releases**: https://github.com/Kathal-OS/kathal/releases
+- **Docker Images**: https://github.com/Kathal-OS/kathal/pkgs/container/kathal
 
 ## License
 

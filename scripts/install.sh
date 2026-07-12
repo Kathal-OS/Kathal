@@ -3,7 +3,7 @@
 # Installs KATHAL dashboard on Ubuntu/Debian/Fedora/Arch.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/bakeweb/kathal-os/main/scripts/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Kathal-OS/kathal/master/scripts/install.sh | sudo bash
 #   Or: sudo bash scripts/install.sh
 
 set -e
@@ -59,7 +59,7 @@ case "$ARCH" in
 esac
 
 BINARY="$INSTALL_DIR/kathal"
-DOWNLOAD_URL="https://github.com/bakeweb/kathal-os/releases/download/v$VERSION/kathal-$VERSION-linux-$ARCH_NAME"
+DOWNLOAD_URL="https://github.com/Kathal-OS/kathal/releases/download/v$VERSION/kathal-$VERSION-linux-$ARCH_NAME"
 
 if curl -fsSL -o "$BINARY" "$DOWNLOAD_URL" 2>/dev/null; then
     chmod +x "$BINARY"
@@ -76,8 +76,8 @@ else
 
     TMPDIR=$(mktemp -d)
     cd "$TMPDIR"
-    curl -fsSL "https://github.com/bakeweb/kathal-os/archive/refs/heads/main.tar.gz" | tar xz
-    cd kathal-os-*
+    curl -fsSL "https://github.com/Kathal-OS/kathal/archive/refs/heads/main.tar.gz" | tar xz
+    cd kathal-*
     go build -o "$BINARY" ./cmd/kathal
     cd /
     rm -rf "$TMPDIR"

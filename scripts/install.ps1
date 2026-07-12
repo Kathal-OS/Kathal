@@ -1,7 +1,7 @@
 <# 
   KATHAL OS — Windows Installer
   Installs KATHAL as a native Windows service.
-  
+
   Usage:
     powershell -ExecutionPolicy Bypass -File install.ps1
 #>
@@ -41,7 +41,7 @@ if (!$dockerAvailable) {
 
 Write-Host "[2/4] Downloading KATHAL v$KATHAL_VERSION..." -ForegroundColor Yellow
 
-$downloadUrl = "https://github.com/bakeweb/kathal-os/releases/download/v$KATHAL_VERSION/kathal-$KATHAL_VERSION-windows-amd64.exe"
+$downloadUrl = "https://github.com/Kathal-OS/kathal/releases/download/v$KATHAL_VERSION/kathal-$KATHAL_VERSION-windows-amd64.exe"
 $binaryPath = "$INSTALL_DIR\kathal.exe"
 
 try {
@@ -60,7 +60,7 @@ try {
         if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
         
         # Download source.
-        $zipUrl = "https://github.com/bakeweb/kathal-os/archive/refs/heads/main.zip"
+        $zipUrl = "https://github.com/Kathal-OS/kathal/archive/refs/heads/main.zip"
         $zipPath = "$env:TEMP\kathal-source.zip"
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
         Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
