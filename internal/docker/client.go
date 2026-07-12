@@ -1,5 +1,5 @@
-// Package docker provides a wrapper around the Docker Engine API
-// for container, image, network, and volume management.
+// Package docker provides a cross-platform Docker client using direct HTTP calls.
+// Supports Linux (Unix socket), Windows (named pipe), and Mac (Unix socket / Docker Desktop).
 package docker
 
 import (
@@ -7,17 +7,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
-	"os"
+	"runtime"
 	"strings"
 	"time"
 )
 
-// Client wraps the Docker Engine API using direct HTTP calls
-// (no heavy SDK dependency — just the Docker socket).
+// Client wraps the Docker Engine API using direct HTTP calls.
 type Client struct {
-	socketPath string
 	httpClient *http.Client
+	available  bool
 }
 
 // Container represents a simplified Docker container.
@@ -34,10 +35,10 @@ type Container struct {
 
 // Image represents a Docker image.
 type Image struct {
-	ID       string `json:"id"`
+	ID       string   `json:"id"`
 	RepoTags []string `json:"repoTags"`
-	Size     int64  `json:"size"`
-	Created  int64  `json:"created"`
+	Size     int64    `json:"size"`
+	Created  int64    `json:"created"`
 }
 
 // PortMapping maps host port to container port.
@@ -49,43 +50,138 @@ type PortMapping struct {
 
 // SystemInfo holds Docker system information.
 type SystemInfo struct {
-	Containers     int `json:"containers"`
-	ContainersRunning int `json:"containersRunning"`
-	ContainersStopped int `json:"containersStopped"`
-	Images         int `json:"images"`
-	ServerVersion  string `json:"serverVersion"`
-	StorageDriver  string `json:"storageDriver"`
-	OperatingSystem string `json:"operatingSystem"`
+	Containers        int    `json:"containers"`
+	ContainersRunning int    `json:"containersRunning"`
+	ContainersStopped int    `json:"containersStopped"`
+	Images            int    `json:"images"`
+	ServerVersion     string `json:"serverVersion"`
+	StorageDriver     string `json:"storageDriver"`
+	OperatingSystem   string `json:"operatingSystem"`
 }
 
-// NewClient creates a new Docker client using the Docker socket.
-func NewClient() (*Client, error) {
-	socketPath := os.Getenv("DOCKER_HOST")
-	if socketPath == "" {
-		socketPath = "unix:///var/run/docker.sock"
+// Status holds the full system status (Docker + OS).
+type Status struct {
+	DockerAvailable bool         `json:"dockerAvailable"`
+	DockerVersion   string       `json:"dockerVersion,omitempty"`
+	DockerInfo      *SystemInfo  `json:"dockerInfo,omitempty"`
+	Platform        string       `json:"platform"`
+	OSName          string       `json:"osName"`
+	Arch            string       `json:"arch"`
+}
+
+// dockerSocket returns the platform-appropriate Docker socket path.
+func dockerSocket() string {
+	if host := envOr("DOCKER_HOST", ""); host != "" {
+		return host
 	}
 
-	// Convert unix:// to unix:// for HTTP transport.
-	transport := &http.Transport{
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 5 * time.Second,
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		return "unix:///var/run/docker.sock"
+	case "windows":
+		// Windows named pipe (Docker Desktop).
+		return "npipe:////./pipe/docker_engine"
+	default:
+		return ""
+	}
+}
+
+// NewClient creates a cross-platform Docker client.
+// If Docker is not available, the client still works but IsAvailable() returns false.
+func NewClient() *Client {
+	socket := dockerSocket()
+	if socket == "" {
+		slog.Warn("kathal: unsupported platform, Docker integration disabled")
+		return &Client{available: false}
 	}
 
-	return &Client{
-		socketPath: strings.TrimPrefix(socketPath, "unix://"),
+	var transport http.RoundTripper
+
+	if strings.HasPrefix(socket, "unix://") || strings.HasPrefix(socket, "unix:") {
+		// Linux / Mac: Unix domain socket.
+		path := strings.TrimPrefix(socket, "unix://")
+		path = strings.TrimPrefix(path, "unix:")
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			DialTLSContext: nil,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:  5 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			// Custom dialer for Unix socket.
+			Dial: func(network, addr string) (net.Conn, error) {
+				return net.DialTimeout("unix", path, 5*time.Second)
+			},
+		}
+	} else if strings.HasPrefix(socket, "npipe:") {
+		// Windows: Named pipe via TCP fallback (Docker Desktop exposes TCP on localhost:2375).
+		// Docker Desktop default TCP endpoint.
+		transport = &http.Transport{
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 5 * time.Second,
+		}
+		// Override socket to TCP for Windows.
+		socket = "tcp://localhost:2375"
+	} else {
+		// TCP connection.
+		transport = &http.Transport{
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 5 * time.Second,
+		}
+	}
+
+	client := &Client{
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   30 * time.Second,
 		},
-	}, nil
+		available: true,
+	}
+
+	// Test connection.
+	if !client.ping() {
+		slog.Warn("kathal: Docker not available, running in system-only mode",
+			"platform", runtime.GOOS,
+			"socket", socket)
+		client.available = false
+	} else {
+		slog.Info("kathal: Docker connected", "platform", runtime.GOOS, "socket", socket)
+	}
+
+	return client
 }
 
 // IsAvailable checks if Docker daemon is reachable.
 func (c *Client) IsAvailable() bool {
-	if c == nil {
-		return false
+	return c != nil && c.available
+}
+
+// GetStatus returns full system status.
+func (c *Client) GetStatus(ctx context.Context) *Status {
+	status := &Status{
+		DockerAvailable: c.IsAvailable(),
+		Platform:        runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		OSName:          runtime.GOOS,
 	}
+
+	if status.DockerAvailable {
+		info, err := c.GetSystemInfo(ctx)
+		if err == nil {
+			status.DockerInfo = info
+			status.DockerVersion = info.ServerVersion
+		}
+	}
+
+	return status
+}
+
+func (c *Client) ping() bool {
 	resp, err := c.get("/_ping")
 	if err != nil {
 		return false
@@ -94,8 +190,12 @@ func (c *Client) IsAvailable() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// ListContainers returns all containers (running and stopped).
+// ListContainers returns all containers.
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("Docker not available")
+	}
+
 	url := "/containers/json"
 	if all {
 		url += "?all=true"
@@ -223,12 +323,15 @@ func (c *Client) GetContainerLogs(ctx context.Context, id string, tail int) (str
 		return "", fmt.Errorf("read logs: %w", err)
 	}
 
-	// Docker logs have 8-byte header per frame, strip them.
 	return stripDockerHeaders(string(body)), nil
 }
 
 // ListImages returns all Docker images.
 func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("Docker not available")
+	}
+
 	resp, err := c.get("/images/json")
 	if err != nil {
 		return nil, fmt.Errorf("list images: %w", err)
@@ -268,13 +371,13 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	defer resp.Body.Close()
 
 	var raw struct {
-		Containers         int    `json:"Containers"`
-		ContainersRunning  int    `json:"ContainersRunning"`
-		ContainersStopped  int    `json:"ContainersStopped"`
-		Images             int    `json:"Images"`
-		ServerVersion      string `json:"ServerVersion"`
-		StorageDriver      string `json:"StorageDriver"`
-		OperatingSystem    string `json:"OperatingSystem"`
+		Containers        int    `json:"Containers"`
+		ContainersRunning int    `json:"ContainersRunning"`
+		ContainersStopped int    `json:"ContainersStopped"`
+		Images            int    `json:"Images"`
+		ServerVersion     string `json:"ServerVersion"`
+		StorageDriver     string `json:"StorageDriver"`
+		OperatingSystem   string `json:"OperatingSystem"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
@@ -282,13 +385,13 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}
 
 	return &SystemInfo{
-		Containers:      raw.Containers,
+		Containers:        raw.Containers,
 		ContainersRunning: raw.ContainersRunning,
 		ContainersStopped: raw.ContainersStopped,
-		Images:          raw.Images,
-		ServerVersion:   raw.ServerVersion,
-		StorageDriver:   raw.StorageDriver,
-		OperatingSystem: raw.OperatingSystem,
+		Images:            raw.Images,
+		ServerVersion:     raw.ServerVersion,
+		StorageDriver:     raw.StorageDriver,
+		OperatingSystem:   raw.OperatingSystem,
 	}, nil
 }
 
@@ -313,9 +416,6 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-
-	// For Unix socket, we need to use a custom transport.
-	// The http.Transport handles this via the DialContext.
 	return c.httpClient.Do(req)
 }
 
@@ -324,19 +424,19 @@ func stripDockerHeaders(s string) string {
 	var result strings.Builder
 	lines := strings.Split(s, "\n")
 	for _, line := range lines {
-		if len(line) > 8 {
-			// Check if this looks like a Docker header (first 8 bytes are non-printable).
-			if line[0] < 32 || line[0] > 126 {
-				result.WriteString(line[8:])
-				result.WriteString("\n")
-			} else {
-				result.WriteString(line)
-				result.WriteString("\n")
-			}
+		if len(line) > 8 && (line[0] < 32 || line[0] > 126) {
+			result.WriteString(line[8:])
 		} else {
 			result.WriteString(line)
-			result.WriteString("\n")
 		}
+		result.WriteString("\n")
 	}
 	return result.String()
+}
+
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(key); v != "" {
+		return def
+	}
+	return def
 }

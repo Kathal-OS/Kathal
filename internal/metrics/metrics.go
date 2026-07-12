@@ -1,10 +1,9 @@
-// Package metrics collects system and Docker metrics.
+// Package metrics collects system and Docker metrics (cross-platform).
 package metrics
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/net"
+	"github.com/shirou/gopsutil/v3/host"
 )
 
 // Collector gathers system and Docker metrics.
@@ -26,14 +26,15 @@ type Collector struct {
 
 // SystemMetrics holds system resource usage.
 type SystemMetrics struct {
-	CPU       float64           `json:"cpu"`
-	CPUCores  int               `json:"cpuCores"`
-	Memory    MemoryMetrics     `json:"memory"`
-	Disk      DiskMetrics       `json:"disk"`
-	Network   NetworkMetrics    `json:"network"`
-	Load      LoadMetrics       `json:"load"`
-	Uptime    uint64            `json:"uptime"`
-	GoVersion string            `json:"goVersion"`
+	CPU       float64       `json:"cpu"`
+	CPUCores  int           `json:"cpuCores"`
+	Memory    MemoryMetrics `json:"memory"`
+	Disk      DiskMetrics   `json:"disk"`
+	Network   NetworkMetrics `json:"network"`
+	Load      LoadMetrics   `json:"load"`
+	Uptime    uint64        `json:"uptime"`
+	GoVersion string        `json:"goVersion"`
+	Platform  string        `json:"platform"`
 }
 
 // MemoryMetrics holds memory usage.
@@ -46,10 +47,11 @@ type MemoryMetrics struct {
 
 // DiskMetrics holds disk usage.
 type DiskMetrics struct {
-	Total uint64  `json:"total"`
-	Used  uint64  `json:"used"`
-	Free  uint64  `json:"free"`
+	Total   uint64  `json:"total"`
+	Used    uint64  `json:"used"`
+	Free    uint64  `json:"free"`
 	Percent float64 `json:"percent"`
+	Path    string  `json:"path"`
 }
 
 // NetworkMetrics holds network I/O.
@@ -69,9 +71,9 @@ type LoadMetrics struct {
 
 // Metrics is the complete metrics snapshot.
 type Metrics struct {
-	System    *SystemMetrics   `json:"system"`
-	Docker    *DockerMetrics   `json:"docker"`
-	Timestamp int64            `json:"timestamp"`
+	System    *SystemMetrics `json:"system"`
+	Docker    *DockerMetrics `json:"docker"`
+	Timestamp int64          `json:"timestamp"`
 }
 
 // DockerMetrics holds Docker-specific metrics.
@@ -131,6 +133,7 @@ func (c *Collector) collectSystem(ctx context.Context) (*SystemMetrics, error) {
 	m := &SystemMetrics{
 		CPUCores:  runtime.NumCPU(),
 		GoVersion: runtime.Version(),
+		Platform:  runtime.GOOS,
 	}
 
 	// CPU usage.
@@ -148,13 +151,15 @@ func (c *Collector) collectSystem(ctx context.Context) (*SystemMetrics, error) {
 		}
 	}
 
-	// Disk.
-	if d, err := disk.UsageWithContext(ctx, "/"); err == nil {
+	// Disk — cross-platform path.
+	diskPath := diskPath()
+	if d, err := disk.UsageWithContext(ctx, diskPath); err == nil {
 		m.Disk = DiskMetrics{
 			Total:   d.Total,
 			Used:    d.Used,
 			Free:    d.Free,
 			Percent: d.UsedPercent,
+			Path:    diskPath,
 		}
 	}
 
@@ -169,7 +174,7 @@ func (c *Collector) collectSystem(ctx context.Context) (*SystemMetrics, error) {
 		}
 	}
 
-	// Load.
+	// Load — available on Linux/Mac, not Windows.
 	if l, err := load.AvgWithContext(ctx); err == nil {
 		m.Load = LoadMetrics{
 			Load1:  l.Load1,
@@ -178,9 +183,9 @@ func (c *Collector) collectSystem(ctx context.Context) (*SystemMetrics, error) {
 		}
 	}
 
-	// Uptime.
-	if stat, err := os.Stat("/proc/uptime"); err == nil {
-		_ = stat // uptime is read differently
+	// Uptime — cross-platform.
+	if u, err := host.UptimeWithContext(ctx); err == nil {
+		m.Uptime = u
 	}
 
 	return m, nil
@@ -196,4 +201,18 @@ func (c *Collector) collectDocker(ctx context.Context) (*DockerMetrics, error) {
 		ContainersStopped: info.ContainersStopped,
 		ImagesCount:       info.Images,
 	}, nil
+}
+
+// diskPath returns the root path for disk metrics based on the OS.
+func diskPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "C:\\"
+	case "darwin":
+		return "/"
+	case "linux":
+		return "/"
+	default:
+		return "/"
+	}
 }

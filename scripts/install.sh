@@ -1,114 +1,185 @@
 #!/bin/bash
-# KATHAL OS Installer
-# Installs KATHAL dashboard on an Ubuntu system (pendrive, VM, or server).
-# Run as root: sudo bash install.sh
+# KATHAL OS — Linux Installer
+# Installs KATHAL dashboard on Ubuntu/Debian/Fedora/Arch.
 #
-# This script:
-# 1. Installs Docker Engine
-# 2. Pulls and runs the KATHAL dashboard container
-# 3. Sets up auto-start on boot
-# 4. Configures the firewall
-#
-# After installation, access the dashboard at: http://<your-ip>:8080
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/bakeweb/kathal-os/master/scripts/install.sh | sudo bash
+#   Or: sudo bash scripts/install.sh
 
-set -euo pipefail
+set -e
 
-KATHAL_VERSION="${KATHAL_VERSION:-latest}"
-KATHAL_PORT="${KATHAL_PORT:-8080}"
-KATHAL_DATA="${KATHAL_DATA:-/opt/kathal/data}"
-KATHAL_CONTAINER="kathal-dashboard"
+VERSION="0.1.0"
+INSTALL_DIR="/opt/kathal"
+CONFIG_DIR="/etc/kathal"
+DATA_DIR="/var/lib/kathal"
+PORT=8080
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+echo ""
+echo "  🍈 KATHAL OS Installer (Linux)"
+echo "  =============================="
+echo ""
 
-log() { echo -e "${GREEN}[kathal]${NC} $1"; }
-warn() { echo -e "${YELLOW}[kathal]${NC} $1"; }
-error() { echo -e "${RED}[kathal]${NC} $1"; exit 1; }
-
-# Check root.
-if [ "$EUID" -ne 0 ]; then
-    error "Please run as root: sudo bash install.sh"
-fi
-
-echo -e "${BLUE}"
-echo "  ╦ ╦╔═╗╔═╗╔╦╗╦╔═╗╔═╗╔═╗"
-echo "  ╠═╣║╣ ╚═╗ ║ ║╠═╣║  ╚═╗"
-echo "  ╩ ╩╚═╝╚═╝ ╩ ╩╩ ╩╚═╝╚═╝"
-echo "  Portable OS Dashboard"
-echo -e "${NC}"
-
-# Step 1: Install Docker.
-log "Step 1/5: Checking Docker..."
-if ! command -v docker &> /dev/null; then
-    log "Installing Docker Engine..."
-    apt-get update -qq
-    apt-get install -y -qq ca-certificates curl gnupg
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    chmod a+r /etc/apt/keyrings/docker.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-    apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
-    systemctl enable docker
-    systemctl start docker
-    log "Docker installed!"
+# Detect distro.
+if [ -f /etc/os-release ]; then
+    DISTRO=$(grep ^ID= /etc/os-release | cut -d= -f2 | tr -d '"')
 else
-    log "Docker already installed: $(docker --version)"
+    DISTRO="unknown"
 fi
 
-# Step 2: Create data directory.
-log "Step 2/5: Setting up data directory..."
-mkdir -p "$KATHAL_DATA"
+echo "  Detected: $DISTRO"
 
-# Step 3: Pull and run KATHAL.
-log "Step 3/5: Pulling KATHAL dashboard..."
-if docker ps -a --format '{{.Names}}' | grep -q "^${KATHAL_CONTAINER}$"; then
-    log "Stopping existing container..."
-    docker stop "$KATHAL_CONTAINER" 2>/dev/null || true
-    docker rm "$KATHAL_CONTAINER" 2>/dev/null || true
+echo ""
+echo "[1/6] Checking dependencies..."
+
+# Check Docker.
+DOCKER_AVAILABLE=false
+if command -v docker &>/dev/null; then
+    DOCKER_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
+    if [ -n "$DOCKER_VERSION" ]; then
+        DOCKER_AVAILABLE=true
+        echo "  Docker found: v$DOCKER_VERSION"
+    fi
 fi
 
-docker run -d \
-    --name "$KATHAL_CONTAINER" \
-    --restart unless-stopped \
-    -p "$KATHAL_PORT:8080" \
-    -v "$KATHAL_DATA:/data" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -e KATHAL_JWT_SECRET="$(openssl rand -hex 32)" \
-    ghcr.io/bakeweb/kathal-os:"$KATHAL_VERSION"
+if [ "$DOCKER_AVAILABLE" = false ]; then
+    echo "  Docker not found. KATHAL will run in system-only mode."
+    echo "  Install Docker for container management:"
+    case "$DISTRO" in
+        ubuntu|debian)
+            echo "    sudo apt-get install docker.io"
+            ;;
+        fedora|rhel|centos)
+            echo "    sudo dnf install docker"
+            ;;
+        arch)
+            echo "    sudo pacman -S docker"
+            ;;
+    esac
+    echo ""
+fi
 
-log "KATHAL dashboard started!"
+echo ""
+echo "[2/6] Downloading KATHAL v$VERSION..."
 
-# Step 4: Configure firewall.
-log "Step 4/5: Configuring firewall..."
-if command -v ufw &> /dev/null; then
-    ufw allow "$KATHAL_PORT/tcp" comment "KATHAL Dashboard" 2>/dev/null || true
-    log "Firewall rule added for port $KATHAL_PORT"
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$DATA_DIR"
+
+# Detect architecture.
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)  ARCH_NAME="amd64" ;;
+    aarch64) ARCH_NAME="arm64" ;;
+    armv7l)  ARCH_NAME="armv7" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+BINARY="$INSTALL_DIR/kathal"
+DOWNLOAD_URL="https://github.com/bakeweb/kathal-os/releases/download/v$VERSION/kathal-$VERSION-linux-$ARCH_NAME"
+
+if curl -fsSL -o "$BINARY" "$DOWNLOAD_URL" 2>/dev/null; then
+    chmod +x "$BINARY"
+    echo "  Downloaded pre-built binary"
 else
-    warn "UFW not found, skipping firewall configuration"
+    echo "  Pre-built binary not available, building from source..."
+    
+    if ! command -v go &>/dev/null; then
+        echo "  Installing Go..."
+        curl -fsSL https://go.dev/dl/go1.22.5.linux-${ARCH_NAME}.tar.gz | sudo tar -C /usr/local -xz
+        export PATH=$PATH:/usr/local/go/bin
+        echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/kathal.sh
+    fi
+    
+    TMPDIR=$(mktemp -d)
+    cd "$TMPDIR"
+    curl -fsSL "https://github.com/bakeweb/kathal-os/archive/refs/heads/master.tar.gz" | tar xz
+    cd kathal-os-*
+    go build -o "$BINARY" ./cmd/kathal
+    cd /
+    rm -rf "$TMPDIR"
+    echo "  Built from source"
 fi
 
-# Step 5: Get IP address.
-log "Step 5/5: Getting IP address..."
-IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
+echo ""
+echo "[3/6] Creating configuration..."
+
+if [ ! -f "$CONFIG_DIR/config.json" ]; then
+    cat > "$CONFIG_DIR/config.json" << EOF
+{
+    "port": $PORT,
+    "logLevel": "info",
+    "dbPath": "$DATA_DIR/kathal.db"
+}
+EOF
+    echo "  Config created at $CONFIG_DIR/config.json"
+else
+    echo "  Config exists, skipping"
+fi
 
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         KATHAL OS Installed!             ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo "[4/6] Creating systemd service..."
+
+cat > /etc/systemd/system/kathal.service << EOF
+[Unit]
+Description=KATHAL OS Dashboard
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=$BINARY
+WorkingDirectory=$DATA_DIR
+Restart=always
+RestartSec=5
+Environment=KATHAL_PORT=$PORT
+Environment=KATHAL_DB=$DATA_DIR/kathal.db
+
+# Security hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=$DATA_DIR
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+echo "  Service created"
+
 echo ""
-echo -e "  Dashboard: ${BLUE}http://${IP_ADDR}:${KATHAL_PORT}${NC}"
+echo "[5/6] Creating user and setting permissions..."
+
+if ! id -u kathal &>/dev/null; then
+    sudo useradd -r -s /bin/false -d "$DATA_DIR" kathal 2>/dev/null || true
+fi
+chown -R kathal:kathal "$DATA_DIR" 2>/dev/null || true
+
 echo ""
-echo -e "  Container: ${KATHAL_CONTAINER}"
-echo -e "  Data:      ${KATHAL_DATA}"
-echo -e "  Docker:    $(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',')"
-echo ""
-echo -e "  Commands:"
-echo -e "    Stop:    ${YELLOW}docker stop ${KATHAL_CONTAINER}${NC}"
-echo -e "    Start:   ${YELLOW}docker start ${KATHAL_CONTAINER}${NC}"
-echo -e "    Logs:    ${YELLOW}docker logs -f ${KATHAL_CONTAINER}${NC}"
-echo -e "    Remove:  ${YELLOW}docker rm -f ${KATHAL_CONTAINER}${NC}"
-echo ""
+echo "[6/6] Starting KATHAL..."
+
+systemctl enable kathal
+systemctl start kathal
+
+# Wait for startup.
+sleep 2
+
+if systemctl is-active --quiet kathal; then
+    echo ""
+    echo "  ✅ KATHAL OS is running!"
+    echo ""
+    echo "  Dashboard: http://localhost:$PORT"
+    echo "  Login:     admin@kathal.local / kathal"
+    echo ""
+    echo "  Commands:"
+    echo "    Status:  systemctl status kathal"
+    echo "    Start:   systemctl start kathal"
+    echo "    Stop:    systemctl stop kathal"
+    echo "    Restart: systemctl restart kathal"
+    echo "    Logs:    journalctl -u kathal -f"
+    echo "    Uninstall: sudo bash $INSTALL_DIR/uninstall.sh"
+    echo ""
+else
+    echo ""
+    echo "  ⚠️  KATHAL failed to start. Check logs:"
+    echo "    journalctl -u kathal -n 50"
+    echo ""
+fi

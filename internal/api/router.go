@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/bakeweb/kathal-os/internal/auth"
@@ -30,11 +31,14 @@ func NewRouter(deps Deps) http.Handler {
 	// API v1.
 	api := r.PathPrefix("/api/v1").Subrouter()
 
+	// System status (cross-platform info).
+	api.HandleFunc("/status", handleSystemStatus(deps)).Methods("GET")
+
 	// Dashboard metrics.
 	api.HandleFunc("/metrics", handleMetrics(deps)).Methods("GET")
 	api.HandleFunc("/system", handleSystemInfo(deps)).Methods("GET")
 
-	// Docker containers.
+	// Docker containers (graceful fallback if Docker unavailable).
 	api.HandleFunc("/containers", handleListContainers(deps)).Methods("GET")
 	api.HandleFunc("/containers/{id}/start", handleStartContainer(deps)).Methods("POST")
 	api.HandleFunc("/containers/{id}/stop", handleStopContainer(deps)).Methods("POST")
@@ -82,18 +86,47 @@ func handleMetrics(deps Deps) http.HandlerFunc {
 func handleSystemInfo(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		info := map[string]interface{}{
-			"version":    deps.Config.Version,
-			"docker":     deps.Docker != nil && deps.Docker.IsAvailable(),
-			"goVersion":  "go1.22",
+			"version":   deps.Config.Version,
+			"docker":    deps.Docker != nil && deps.Docker.IsAvailable(),
+			"goVersion": "go1.22",
 		}
 		writeJSON(w, info)
+	}
+}
+
+// handleSystemStatus returns full cross-platform system status.
+func handleSystemStatus(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := map[string]interface{}{
+			"version":         deps.Config.Version,
+			"platform":        runtime.GOOS,
+			"arch":            runtime.GOARCH,
+			"goVersion":       runtime.Version(),
+			"dockerAvailable": deps.Docker != nil && deps.Docker.IsAvailable(),
+		}
+
+		// Add Docker info if available.
+		if deps.Docker != nil && deps.Docker.IsAvailable() {
+			info, err := deps.Docker.GetSystemInfo(r.Context())
+			if err == nil {
+				status["dockerVersion"] = info.ServerVersion
+				status["dockerContainers"] = info.Containers
+				status["dockerImages"] = info.Images
+			}
+		}
+
+		writeJSON(w, status)
 	}
 }
 
 func handleListContainers(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.Docker == nil || !deps.Docker.IsAvailable() {
-			writeJSON(w, []interface{}{})
+			// Return empty list with a hint.
+			writeJSON(w, map[string]interface{}{
+				"containers": []interface{}{},
+				"message":    "Docker not available — install Docker Desktop or run kathal in Docker mode",
+			})
 			return
 		}
 		all := r.URL.Query().Get("all") == "true"
@@ -108,6 +141,10 @@ func handleListContainers(deps Deps) http.HandlerFunc {
 
 func handleStartContainer(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Docker == nil || !deps.Docker.IsAvailable() {
+			writeError(w, http.StatusServiceUnavailable, "Docker not available")
+			return
+		}
 		id := mux.Vars(r)["id"]
 		if err := deps.Docker.StartContainer(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -119,6 +156,10 @@ func handleStartContainer(deps Deps) http.HandlerFunc {
 
 func handleStopContainer(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Docker == nil || !deps.Docker.IsAvailable() {
+			writeError(w, http.StatusServiceUnavailable, "Docker not available")
+			return
+		}
 		id := mux.Vars(r)["id"]
 		if err := deps.Docker.StopContainer(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -130,6 +171,10 @@ func handleStopContainer(deps Deps) http.HandlerFunc {
 
 func handleRestartContainer(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Docker == nil || !deps.Docker.IsAvailable() {
+			writeError(w, http.StatusServiceUnavailable, "Docker not available")
+			return
+		}
 		id := mux.Vars(r)["id"]
 		if err := deps.Docker.RestartContainer(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -141,6 +186,10 @@ func handleRestartContainer(deps Deps) http.HandlerFunc {
 
 func handleDeleteContainer(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Docker == nil || !deps.Docker.IsAvailable() {
+			writeError(w, http.StatusServiceUnavailable, "Docker not available")
+			return
+		}
 		id := mux.Vars(r)["id"]
 		if err := deps.Docker.RemoveContainer(r.Context(), id, true); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -152,6 +201,10 @@ func handleDeleteContainer(deps Deps) http.HandlerFunc {
 
 func handleContainerLogs(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if deps.Docker == nil || !deps.Docker.IsAvailable() {
+			writeJSON(w, map[string]string{"logs": "Docker not available"})
+			return
+		}
 		id := mux.Vars(r)["id"]
 		logs, err := deps.Docker.GetContainerLogs(r.Context(), id, 100)
 		if err != nil {
@@ -165,7 +218,10 @@ func handleContainerLogs(deps Deps) http.HandlerFunc {
 func handleListImages(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps.Docker == nil || !deps.Docker.IsAvailable() {
-			writeJSON(w, []interface{}{})
+			writeJSON(w, map[string]interface{}{
+				"images":  []interface{}{},
+				"message": "Docker not available",
+			})
 			return
 		}
 		images, err := deps.Docker.ListImages(r.Context())
@@ -256,8 +312,6 @@ func handleLogin(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		// For now, accept any email with password "kathal" or the default admin.
-		// In production, this should check the database.
 		if req.Password != "kathal" && req.Password != "admin" {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
@@ -268,7 +322,6 @@ func handleLogin(deps Deps) http.HandlerFunc {
 			email = "admin@kathal.local"
 		}
 
-		// Generate token.
 		token, err := deps.JWT.GenerateToken("admin", email, "admin", 72*time.Hour)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to generate token")

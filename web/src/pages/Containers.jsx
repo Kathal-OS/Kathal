@@ -1,166 +1,182 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useApi, apiPost, apiDelete } from '../hooks/useApi'
 
 function ContainerRow({ container, onRefresh }) {
   const [loading, setLoading] = useState(false)
-  const [logs, setLogs] = useState(null)
-  const isRunning = container.state === 'running'
 
-  async function action(type) {
+  const action = async (fn) => {
     setLoading(true)
-    try {
-      if (type === 'delete') {
-        if (!confirm(`Delete container ${container.name}?`)) return
-        await apiDelete(`/containers/${container.id}/delete`)
-      } else {
-        await apiPost(`/containers/${container.id}/${type}`)
-      }
-      onRefresh()
-    } catch (err) {
-      alert(`Error: ${err.message}`)
-    } finally {
-      setLoading(false)
-    }
+    try { await fn() } catch {}
+    setLoading(false)
+    onRefresh()
   }
 
-  async function showLogs() {
-    try {
-      const res = await fetch(`/api/v1/containers/${container.id}/logs`)
-      const data = await res.json()
-      setLogs(data.logs)
-    } catch (err) {
-      alert(`Logs error: ${err.message}`)
-    }
+  const stateColor = {
+    running: 'bg-green-500',
+    exited: 'bg-gray-500',
+    paused: 'bg-yellow-500',
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-colors">
-      <div className="flex items-start justify-between">
+    <tr className="border-b border-gray-800 hover:bg-gray-900/50">
+      <td className="py-3 px-4">
         <div className="flex items-center gap-3">
-          <span className={`w-3 h-3 rounded-full ${isRunning ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+          <span className={`w-2.5 h-2.5 rounded-full ${stateColor[container.state] || 'bg-gray-500'}`}></span>
           <div>
-            <h3 className="font-semibold text-lg">{container.name}</h3>
-            <p className="text-sm text-gray-500">{container.image}</p>
+            <p className="font-medium">{container.name || container.id}</p>
+            <p className="text-xs text-gray-600">{container.image}</p>
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {container.ports?.map((p, i) => (
-            <a
-              key={i}
-              href={`http://localhost:${p.hostPort}`}
-              target="_blank"
-              rel="noopener"
-              className="text-xs bg-gray-800 px-2 py-1 rounded hover:bg-gray-700 transition-colors"
-            >
-              :{p.hostPort}
-            </a>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center gap-2">
-        <span className="text-xs text-gray-500 mr-2">{container.status}</span>
-
-        {isRunning ? (
-          <>
+      </td>
+      <td className="py-3 px-4">
+        <span className={`text-sm ${
+          container.state === 'running' ? 'text-green-400' : 'text-gray-500'
+        }`}>
+          {container.state}
+        </span>
+      </td>
+      <td className="py-3 px-4">
+        {container.ports?.map((p, i) => (
+          <span key={i} className="inline-block bg-gray-800 rounded px-2 py-0.5 text-xs mr-1 mb-1">
+            {p.hostPort}:{p.containerPort}
+          </span>
+        ))}
+      </td>
+      <td className="py-3 px-4">
+        <div className="flex gap-2">
+          {container.state !== 'running' && (
             <button
-              onClick={() => action('stop')}
+              onClick={() => action(() => apiPost(`/containers/${container.id}/start`))}
               disabled={loading}
-              className="px-3 py-1.5 text-xs bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-colors disabled:opacity-50"
+              className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs transition-colors disabled:opacity-50"
             >
-              ⏹ Stop
+              ▶ Start
             </button>
-            <button
-              onClick={() => action('restart')}
-              disabled={loading}
-              className="px-3 py-1.5 text-xs bg-yellow-600/20 text-yellow-400 rounded-lg hover:bg-yellow-600/30 transition-colors disabled:opacity-50"
-            >
-              🔄 Restart
-            </button>
-          </>
-        ) : (
+          )}
+          {container.state === 'running' && (
+            <>
+              <button
+                onClick={() => action(() => apiPost(`/containers/${container.id}/stop`))}
+                disabled={loading}
+                className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 rounded text-xs transition-colors disabled:opacity-50"
+              >
+                ⏹ Stop
+              </button>
+              <button
+                onClick={() => action(() => apiPost(`/containers/${container.id}/restart`))}
+                disabled={loading}
+                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs transition-colors disabled:opacity-50"
+              >
+                🔄
+              </button>
+            </>
+          )}
           <button
-            onClick={() => action('start')}
+            onClick={() => {
+              if (confirm('Delete this container?'))
+                action(() => apiDelete(`/containers/${container.id}/delete`))
+            }}
             disabled={loading}
-            className="px-3 py-1.5 text-xs bg-green-600/20 text-green-400 rounded-lg hover:bg-green-600/30 transition-colors disabled:opacity-50"
+            className="px-3 py-1 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-colors disabled:opacity-50"
           >
-            ▶ Start
+            🗑
           </button>
-        )}
-
-        <button
-          onClick={showLogs}
-          className="px-3 py-1.5 text-xs bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors"
-        >
-          📋 Logs
-        </button>
-
-        <button
-          onClick={() => action('delete')}
-          disabled={loading}
-          className="px-3 py-1.5 text-xs bg-gray-800 text-gray-500 rounded-lg hover:bg-red-600/20 hover:text-red-400 transition-colors disabled:opacity-50"
-        >
-          🗑️
-        </button>
-      </div>
-
-      {/* Logs modal */}
-      {logs && (
-        <div className="mt-4 bg-gray-950 rounded-lg p-4 max-h-64 overflow-auto font-mono text-xs text-gray-400">
-          <div className="flex justify-between mb-2">
-            <span className="text-gray-500">Logs (last 100 lines)</span>
-            <button onClick={() => setLogs(null)} className="text-gray-600 hover:text-gray-400">✕</button>
-          </div>
-          <pre className="whitespace-pre-wrap">{logs}</pre>
         </div>
-      )}
-    </div>
+      </td>
+    </tr>
   )
 }
 
 export default function Containers() {
-  const [refreshKey, setRefreshKey] = useState(0)
-  const { data: containers, loading } = useApi('/containers?all=true')
+  const { data: status } = useApi('/status')
+  const [containers, setContainers] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  function refresh() {
-    setRefreshKey(k => k + 1)
-  }
+  const fetchContainers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/containers?all=true', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('kathal_token')}`,
+        },
+      })
+      const data = await res.json()
+      // Handle both array and object response (Docker unavailable returns object).
+      if (Array.isArray(data)) {
+        setContainers(data)
+      } else if (data.containers) {
+        setContainers(data.containers)
+      } else {
+        setContainers([])
+      }
+    } catch {
+      setContainers([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-gray-500 text-lg">Loading containers...</div>
-      </div>
-    )
-  }
+  useEffect(() => { fetchContainers() }, [fetchContainers])
+
+  const dockerAvailable = status?.dockerAvailable || false
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-3xl font-bold">Containers</h2>
-          <p className="text-gray-500 mt-1">{containers?.length || 0} containers total</p>
+          <h1 className="text-3xl font-bold">Containers</h1>
+          <p className="text-gray-500 mt-1">
+            {dockerAvailable ? `${containers.length} containers` : 'Docker not available'}
+          </p>
         </div>
-        <button
-          onClick={refresh}
-          className="px-4 py-2 bg-kathal-600 text-white rounded-lg hover:bg-kathal-700 transition-colors text-sm"
-        >
-          🔄 Refresh
-        </button>
+        {dockerAvailable && (
+          <button
+            onClick={fetchContainers}
+            className="px-4 py-2 bg-kathal-600 hover:bg-kathal-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            🔄 Refresh
+          </button>
+        )}
       </div>
 
-      {!containers || containers.length === 0 ? (
-        <div className="text-center py-20">
+      {!dockerAvailable ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
           <span className="text-6xl mb-4 block">🐳</span>
-          <h3 className="text-xl font-semibold text-gray-400">No containers</h3>
-          <p className="text-gray-600 mt-2">Docker containers will appear here</p>
+          <h2 className="text-xl font-semibold mb-2">Docker Not Available</h2>
+          <p className="text-gray-500 max-w-md mx-auto mb-6">
+            Install Docker to manage containers from the dashboard.
+            KATHAL is running in system-only mode.
+          </p>
+          <div className="space-y-2 text-sm text-gray-600">
+            <p><strong>Windows:</strong> Install Docker Desktop</p>
+            <p><strong>Mac:</strong> Install Docker Desktop or <code>brew install docker</code></p>
+            <p><strong>Linux:</strong> <code>sudo apt-get install docker.io</code></p>
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="text-center py-12 text-gray-500">Loading containers...</div>
+      ) : containers.length === 0 ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
+          <span className="text-6xl mb-4 block">📦</span>
+          <h2 className="text-xl font-semibold mb-2">No Containers</h2>
+          <p className="text-gray-500">Deploy your first app from the Dashboard.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {containers.map(c => (
-            <ContainerRow key={c.id} container={c} onRefresh={refresh} />
-          ))}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-800/50">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Container</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Status</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Ports</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-400">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {containers.map(c => (
+                <ContainerRow key={c.id} container={c} onRefresh={fetchContainers} />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
