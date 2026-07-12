@@ -12,6 +12,7 @@ type Config struct {
 	Version  string
 	HTTPAddr string
 	DBPath   string
+	DataDir  string
 	LogLevel slog.Level
 
 	// Docker socket path.
@@ -30,6 +31,7 @@ func Load() *Config {
 		Version:      getEnv("KATHAL_VERSION", "0.1.0"),
 		HTTPAddr:     getEnv("KATHAL_HTTP_ADDR", ":8080"),
 		DBPath:       getEnv("KATHAL_DB_PATH", "/data/kathal.db"),
+		DataDir:      getEnv("KATHAL_DATA_DIR", "/data"),
 		DockerSocket: getEnv("DOCKER_HOST", "unix:///var/run/docker.sock"),
 		AppStoreURL:  getEnv("KATHAL_APP_STORE_URL", "https://raw.githubusercontent.com/bakeweb/kathal-os/main/deploy/apps.json"),
 		JWTSecret:    getEnv("KATHAL_JWT_SECRET", "kathal-dev-secret-change-me"),

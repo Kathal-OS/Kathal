@@ -10,9 +10,13 @@ import (
 
 	"github.com/bakeweb/kathal-os/internal/api"
 	"github.com/bakeweb/kathal-os/internal/auth"
+	"github.com/bakeweb/kathal-os/internal/backup"
 	"github.com/bakeweb/kathal-os/internal/config"
+	"github.com/bakeweb/kathal-os/internal/dbmanager"
 	"github.com/bakeweb/kathal-os/internal/docker"
+	"github.com/bakeweb/kathal-os/internal/filemanager"
 	"github.com/bakeweb/kathal-os/internal/metrics"
+	"github.com/bakeweb/kathal-os/internal/proxy"
 	"github.com/bakeweb/kathal-os/internal/store"
 )
 
@@ -48,12 +52,26 @@ func main() {
 
 	dockerClient := docker.NewClient()
 
+	// Initialize new modules.
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = "."
+	}
+	proxyMgr := proxy.NewManager(dataDir, slog.Default())
+	dbMgr := dbmanager.NewManager(cfg.DockerSocket)
+	fileMgr := filemanager.NewManager(dataDir)
+	backupMgr := backup.NewManager(dataDir, cfg.DBPath)
+
 	deps := api.Deps{
-		Config:  cfg,
-		Store:   db,
-		Docker:  dockerClient,
-		Metrics: metrics.New(dockerClient),
-		JWT:     auth.New(jwtSecret),
+		Config:    cfg,
+		Store:     db,
+		Docker:    dockerClient,
+		Metrics:   metrics.New(dockerClient),
+		JWT:       auth.New(jwtSecret),
+		Proxy:     proxyMgr,
+		DBManager: dbMgr,
+		Files:     fileMgr,
+		Backup:    backupMgr,
 	}
 
 	router := api.NewRouter(deps)

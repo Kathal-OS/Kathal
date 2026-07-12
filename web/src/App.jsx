@@ -4,13 +4,21 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Containers from './pages/Containers'
 import Images from './pages/Images'
+import ProxyManager from './pages/ProxyManager'
+import Databases from './pages/Databases'
+import FileManager from './pages/FileManager'
+import Backups from './pages/Backups'
 import Settings from './pages/Settings'
 
 const nav = [
-  { to: '/',          icon: '📊', label: 'Dashboard' },
+  { to: '/',           icon: '📊', label: 'Dashboard' },
   { to: '/containers', icon: '🐳', label: 'Containers' },
-  { to: '/images',    icon: '📦', label: 'Images' },
-  { to: '/settings',  icon: '⚙️',  label: 'Settings' },
+  { to: '/images',     icon: '📦', label: 'Images' },
+  { to: '/proxy',      icon: '🔀', label: 'Proxy' },
+  { to: '/databases',  icon: '🗄️', label: 'Databases' },
+  { to: '/files',      icon: '📂', label: 'Files' },
+  { to: '/backups',    icon: '💾', label: 'Backups' },
+  { to: '/settings',   icon: '⚙️', label: 'Settings' },
 ]
 
 function ProtectedRoute({ children, token }) {
@@ -70,7 +78,7 @@ export default function App() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {nav.map(item => (
             <NavLink
               key={item.to}
@@ -114,6 +122,10 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute token={token}><Dashboard /></ProtectedRoute>} />
           <Route path="/containers" element={<ProtectedRoute token={token}><Containers /></ProtectedRoute>} />
           <Route path="/images" element={<ProtectedRoute token={token}><Images /></ProtectedRoute>} />
+          <Route path="/proxy" element={<ProtectedRoute token={token}><ProxyManager /></ProtectedRoute>} />
+          <Route path="/databases" element={<ProtectedRoute token={token}><Databases /></ProtectedRoute>} />
+          <Route path="/files" element={<ProtectedRoute token={token}><FileManager /></ProtectedRoute>} />
+          <Route path="/backups" element={<ProtectedRoute token={token}><Backups /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute token={token}><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
