@@ -3,6 +3,7 @@ name: KATHAL OS CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -107,3 +108,41 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, test, frontend, docker]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build cross-platform binaries
+        run: |
+          for GOOS in linux windows darwin; do
+            for GOARCH in amd64 arm64; do
+              if [ "$GOOS" = "windows" ] && [ "$GOARCH" = "arm64" ]; then
+                continue
+              fi
+              EXT=""
+              [ "$GOOS" = "windows" ] && EXT=".exe"
+              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" -o dist/kathal-${GOOS}-${GOARCH}${EXT} ./cmd/kathal/
+            done
+          done
+          ls -la dist/
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
