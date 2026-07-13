@@ -47,14 +47,27 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+      - name: Check for test files
+        id: check_tests
+        run: |
+          TEST_FILES=$(find . -name '*_test.go' 2>/dev/null | head -1)
+          if [ -z "$TEST_FILES" ]; then
+            echo "No test files found, skipping tests"
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_tests=true" >> $GITHUB_OUTPUT
+          fi
       - name: Run tests
+        if: steps.check_tests.outputs.has_tests == 'true'
         run: go test -short ./...
+      - name: Skip tests (no test files)
+        if: steps.check_tests.outputs.has_tests == 'false'
+        run: echo "No test files found, skipping test execution"
 
   frontend:
     name: Frontend Build
