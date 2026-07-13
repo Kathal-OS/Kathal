@@ -13,11 +13,11 @@ export function useApi(path) {
 
     const token = localStorage.getItem('kathal_token')
     const headers = {}
-    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (token) headers['Authorization'] = 'Bearer ' + token
 
-    fetch(`/api/v1${path}`, { headers })
+    fetch('/api/v1' + path, { headers })
       .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        if (!res.ok) throw new Error('HTTP ' + res.status)
         return res.json()
       })
       .then(json => { if (!cancelled) setData(json) })
@@ -33,20 +33,54 @@ export function useApi(path) {
 export async function apiFetch(path, options = {}) {
   const token = localStorage.getItem('kathal_token')
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (token) headers['Authorization'] = 'Bearer ' + token
 
-  const res = await fetch(`/api/v1${path}`, { ...options, headers })
+  const res = await fetch('/api/v1' + path, { ...options, headers })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
   return data
 }
 
-// apiPost sends a POST with JWT auth.
+export async function apiFetchBlob(path, options = {}) {
+  const token = localStorage.getItem('kathal_token')
+  const headers = { ...options.headers }
+  if (token) headers['Authorization'] = 'Bearer ' + token
+
+  const res = await fetch('/api/v1' + path, { ...options, headers })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return res.blob()
+}
+
+export async function apiFetchText(path, options = {}) {
+  const token = localStorage.getItem('kathal_token')
+  const headers = { ...options.headers }
+  if (token) headers['Authorization'] = 'Bearer ' + token
+
+  const res = await fetch('/api/v1' + path, { ...options, headers })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return res.text()
+}
+
+export async function apiPostFormData(path, formData, options = {}) {
+  const token = localStorage.getItem('kathal_token')
+  const headers = { ...options.headers }
+  if (token) headers['Authorization'] = 'Bearer ' + token
+
+  const res = await fetch('/api/v1' + path, {
+    ...options,
+    method: 'POST',
+    headers,
+    body: formData
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+  return data
+}
+
 export async function apiPost(path, body) {
   return apiFetch(path, { method: 'POST', body: JSON.stringify(body) })
 }
 
-// apiDelete sends a DELETE with JWT auth.
 export async function apiDelete(path) {
   return apiFetch(path, { method: 'DELETE' })
 }

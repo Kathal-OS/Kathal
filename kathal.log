@@ -1,0 +1,2 @@
+time=2026-07-13T08:08:52.056+05:30 level=WARN msg="kathal: Docker not available, running in system-only mode" platform=windows socket=tcp://localhost:2375
+time=2026-07-13T08:08:52.061+05:30 level=INFO msg="kathal: starting server" addr=:8080 version=0.1.0 dockerAvailable=false

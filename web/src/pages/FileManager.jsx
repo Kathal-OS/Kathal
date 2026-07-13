@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { apiFetch, apiPost, apiDelete } from '../hooks/useApi'
+import { apiFetch, apiPost, apiDelete, apiFetchText, apiPostFormData } from '../hooks/useApi'
 
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B'
@@ -34,7 +34,7 @@ export default function FileManager() {
   async function loadDir(dirPath) {
     setLoading(true)
     try {
-      const data = await apiFetch(`/api/v1/files?path=${encodeURIComponent(dirPath)}`)
+      const data = await apiFetch('/files?path=' + encodeURIComponent(dirPath))
       setItems(Array.isArray(data) ? data : [])
     } catch { setItems([]) }
     setLoading(false)
@@ -42,11 +42,7 @@ export default function FileManager() {
 
   async function openFile(filePath) {
     try {
-      const resp = await fetch(`/api/v1/files/read?path=${encodeURIComponent(filePath)}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('kathal_token')}` }
-      })
-      if (!resp.ok) throw new Error('Failed to read file')
-      const text = await resp.text()
+      const text = await apiFetchText('/files/read?path=' + encodeURIComponent(filePath))
       setEditor(filePath)
       setEditorContent(text)
     } catch (err) { alert(err.message) }
@@ -54,23 +50,23 @@ export default function FileManager() {
 
   async function saveFile() {
     try {
-      await apiPost('/api/v1/files/write', { path: editor, content: editorContent })
+      await apiPost('/files/write', { path: editor, content: editorContent })
       setEditor(null)
       loadDir(path)
     } catch (err) { alert(err.message) }
   }
 
   async function handleDelete(filePath, isDir) {
-    if (!confirm(`Delete ${isDir ? 'folder' : 'file'}: ${filePath}?`)) return
-    await apiDelete(`/api/v1/files/delete?path=${encodeURIComponent(filePath)}`)
+    if (!confirm('Delete ' + (isDir ? 'folder' : 'file') + ': ' + filePath + '?')) return
+    await apiDelete('/files/delete?path=' + encodeURIComponent(filePath))
     loadDir(path)
   }
 
   async function handleMkdir() {
     const name = prompt('Folder name:')
     if (!name) return
-    const fullPath = path === '/' ? `/${name}` : `${path}/${name}`
-    await apiPost('/api/v1/files/mkdir', { path: fullPath })
+    const fullPath = path === '/' ? '/' + name : path + '/' + name
+    await apiPost('/files/mkdir', { path: fullPath })
     loadDir(path)
   }
 
@@ -79,21 +75,17 @@ export default function FileManager() {
     if (!file) return
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('path', path === '/' ? file.name : `${path}/${file.name}`)
-    await fetch('/api/v1/files/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('kathal_token')}` },
-      body: formData
-    })
+    formData.append('path', path === '/' ? file.name : path + '/' + file.name)
+    await apiPostFormData('/files/upload', formData)
     setShowUpload(false)
     loadDir(path)
   }
 
   function navigate(name, is_dir) {
     if (is_dir) {
-      setPath(path === '/' ? `/${name}` : `${path}/${name}`)
+      setPath(path === '/' ? '/' + name : path + '/' + name)
     } else {
-      openFile(path === '/' ? `/${name}` : `${path}/${name}`)
+      openFile(path === '/' ? '/' + name : path + '/' + name)
     }
   }
 
@@ -174,7 +166,7 @@ export default function FileManager() {
                   </td>
                   <td className="text-right px-4 py-3 text-sm text-gray-500">{item.is_dir ? '-' : formatSize(item.size)}</td>
                   <td className="text-right px-4 py-3 pr-4">
-                    <button onClick={() => handleDelete(path === '/' ? `/${item.name}` : `${path}/${item.name}`, item.is_dir)} className="text-red-500 hover:text-red-400 text-xs">Delete</button>
+                    <button onClick={() => handleDelete(path === '/' ? '/' + item.name : path + '/' + item.name, item.is_dir)} className="text-red-500 hover:text-red-400 text-xs">Delete</button>
                   </td>
                 </tr>
               ))}

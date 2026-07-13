@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { apiFetch, apiPost, apiDelete } from '../hooks/useApi'
+import { apiFetch, apiPost, apiDelete, apiFetchBlob, apiPostFormData } from '../hooks/useApi'
 
 export default function Backups() {
   const [backups, setBackups] = useState([])
@@ -11,7 +11,7 @@ export default function Backups() {
   async function loadBackups() {
     setLoading(true)
     try {
-      const data = await apiFetch('/api/v1/backups')
+      const data = await apiFetch('/backups')
       setBackups(Array.isArray(data) ? data : [])
     } catch { setBackups([]) }
     setLoading(false)
@@ -22,7 +22,7 @@ export default function Backups() {
     if (name === null) return
     setCreating(true)
     try {
-      await apiPost('/api/v1/backups', { name })
+      await apiPost('/backups', { name })
       loadBackups()
     } catch (err) { alert(err.message) }
     setCreating(false)
@@ -31,28 +31,24 @@ export default function Backups() {
   async function handleRestore(id) {
     if (!confirm('Restore this backup? Current data will be overwritten.')) return
     try {
-      await apiPost(`/api/v1/backups/${id}/restore`, {})
+      await apiPost('/backups/' + id + '/restore', {})
       alert('Backup restored! Restart KATHAL to apply.')
     } catch (err) { alert(err.message) }
   }
 
   async function handleDelete(id) {
     if (!confirm('Delete this backup?')) return
-    await apiDelete(`/api/v1/backups/${id}`)
+    await apiDelete('/backups/' + id)
     loadBackups()
   }
 
   async function handleExport() {
     try {
-      const resp = await fetch('/api/v1/backups/export', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('kathal_token')}` }
-      })
-      if (!resp.ok) throw new Error('Export failed')
-      const blob = await resp.blob()
+      const blob = await apiFetchBlob('/backups/export')
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `kathal-export-${new Date().toISOString().slice(0, 10)}.zip`
+      a.download = 'kathal-export-' + new Date().toISOString().slice(0, 10) + '.zip'
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) { alert(err.message) }
@@ -64,12 +60,7 @@ export default function Backups() {
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const resp = await fetch('/api/v1/backups/import', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('kathal_token')}` },
-        body: formData
-      })
-      if (!resp.ok) throw new Error('Import failed')
+      await apiPostFormData('/backups/import', formData)
       alert('Import successful! Restart KATHAL to apply.')
       loadBackups()
     } catch (err) { alert(err.message) }
