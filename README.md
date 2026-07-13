@@ -16,7 +16,7 @@
 <img src="https://img.shields.io/badge/docker-optional-2496ED?style=flat-square&logo=docker&logoColor=white" />
 <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Docker-lightgrey?style=flat-square" />
 </p>
-<img width="768" height="512" alt="image" src="https://github.com/user-attachments/assets/6ac92321-e410-487a-a869-e9d223f3e870" />
+
 <p>
 <a href="https://github.com/Kathal-OS/kathal"><b>Repository</b></a> •
 <a href="https://github.com/Kathal-OS/kathal/issues"><b>Issues</b></a> •
@@ -30,6 +30,8 @@
 <br/>
 
 ---
+
+<img width="768" height="512" alt="image" src="https://github.com/user-attachments/assets/6ac92321-e410-487a-a869-e9d223f3e870" />
 
 ## 📖 Table of Contents
 
