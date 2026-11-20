@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { apiFetch, apiPost, apiDelete } from '../hooks/useApi'
 
 export default function Env() {
@@ -6,128 +6,228 @@ export default function Env() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ key: '', value: '', description: '', secret: false })
+  const [revealed, setRevealed] = useState({})
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState(null)
+  const [feedback, setFeedback] = useState(null)
+
+  const loadEnv = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await apiFetch('/env')
+      setGlobalEnv(Array.isArray(data) ? data : [])
+    } catch {
+      setGlobalEnv([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     loadEnv()
-  }, [])
+  }, [loadEnv])
 
-  async function loadEnv() {
-    setLoading(true)
+  async function handleAdd(e) {
+    e.preventDefault()
+    setFeedback(null)
     try {
-      const data = await apiFetch('/api/v1/env')
-      setGlobalEnv(data || [])
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  async function handleAdd() {
-    try {
-      await apiPost('/api/v1/env', form)
+      await apiPost('/env', form)
       setShowAdd(false)
       setForm({ key: '', value: '', description: '', secret: false })
+      setFeedback({ type: 'success', text: `Saved environment variable "${form.key}".` })
       loadEnv()
-    } catch (e) {
-      alert('Failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to save variable' })
     }
   }
 
   async function handleDelete(key) {
-    if (!confirm('Delete environment variable "' + key + '"?')) return
+    setFeedback(null)
     try {
-      await apiDelete('/api/v1/env/' + key)
+      await apiDelete('/env/' + encodeURIComponent(key))
+      setConfirmDeleteKey(null)
+      setFeedback({ type: 'success', text: `Removed variable "${key}".` })
       loadEnv()
-    } catch (e) {
-      alert('Delete failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Delete failed' })
     }
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h2 style={{ margin: 0 }}>Environment Variables</h2>
-        <button onClick={() => { setForm({ key: '', value: '', description: '', secret: false }); setShowAdd(true) }}
-          style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>
+    <div className="p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Environment Variables</h1>
+          <p className="text-gray-500 mt-1">Global secrets and runtime variables injected into deployed containers</p>
+        </div>
+        <button
+          onClick={() => {
+            setForm({ key: '', value: '', description: '', secret: false })
+            setShowAdd(true)
+          }}
+          className="px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium transition-colors"
+        >
           + Add Variable
         </button>
       </div>
 
-      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ padding: 16, borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ background: '#3b82f6', color: 'white', padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
+      {feedback && (
+        <div
+          className={`mb-4 p-3 rounded-lg border text-sm ${
+            feedback.type === 'error'
+              ? 'bg-red-600/10 border-red-600/30 text-red-400'
+              : 'bg-green-600/10 border-green-600/30 text-green-400'
+          }`}
+        >
+          {feedback.text}
+        </div>
+      )}
+
+      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-gray-800 flex items-center gap-3">
+          <span className="bg-kathal-600/20 text-kathal-400 border border-kathal-600/30 px-2.5 py-0.5 rounded text-xs font-medium">
             Global ({globalEnv.length})
           </span>
-          <span style={{ color: '#94a3b8', fontSize: 13 }}>
-            Applied to all containers on deploy
-          </span>
+          <span className="text-gray-500 text-xs">Applied automatically on container and Git deployments</span>
         </div>
 
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading...</div>
+          <div className="p-10 text-center text-gray-500">Loading variables...</div>
         ) : globalEnv.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#64748b' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🔐</div>
-            <p>No global environment variables</p>
-            <p style={{ fontSize: 13 }}>Add variables to inject into all containers</p>
+          <div className="p-12 text-center text-gray-500">
+            <div className="text-5xl mb-3">🔐</div>
+            <p className="font-medium text-gray-300">No global environment variables</p>
+            <p className="text-xs text-gray-500 mt-1">Add variables to inject into all deployed apps</p>
           </div>
         ) : (
-          <div style={{ overflow: 'auto' }}>
-            {globalEnv.map((env, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #334155' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code style={{ background: '#0f172a', padding: '2px 8px', borderRadius: 4, fontSize: 13 }}>
-                      {env.key}
-                    </code>
-                    {env.secret && <span style={{ background: '#ef4444', color: 'white', padding: '2px 6px', borderRadius: 4, fontSize: 10 }}>SECRET</span>}
+          <div className="divide-y divide-gray-800">
+            {globalEnv.map((env) => {
+              const isRevealed = Boolean(revealed[env.key])
+              return (
+                <div key={env.key} className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <code className="bg-gray-950 border border-gray-800 px-2.5 py-1 rounded text-xs font-mono text-gray-200">
+                        {env.key}
+                      </code>
+                      {env.secret && (
+                        <span className="bg-red-600/20 text-red-400 border border-red-600/30 px-2 py-0.5 rounded text-[10px] font-semibold">
+                          SECRET
+                        </span>
+                      )}
+                    </div>
+                    {env.description && <p className="text-xs text-gray-500 mt-1">{env.description}</p>}
                   </div>
-                  {env.description && <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>{env.description}</p>}
-                </div>
-                <code style={{ background: '#0f172a', padding: '4px 8px', borderRadius: 4, fontSize: 12, color: '#94a3b8', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                  {env.secret ? '••••••••' : env.value}
-                </code>
-                <button onClick={() => handleDelete(env.key)}
-                  style={{ marginLeft: 12, padding: '6px 10px', background: '#ef4444', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 12 }}>
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
 
-        {/* Add Modal */}
-        {showAdd && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setShowAdd(false)}>
-            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: 32, width: 480, maxWidth: '90%' }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: '0 0 20px' }}>Add Environment Variable</h3>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Key</label>
-                <input value={form.key} onChange={e => setForm({...form, key: e.target.value})} placeholder="DATABASE_URL"
-                  style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }} />
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Value</label>
-                <input value={form.value} onChange={e => setForm({...form, value: e.target.value})} placeholder="postgresql://..."
-                  style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }} />
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Description (optional)</label>
-                <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Production database URL"
-                  style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }} />
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#94a3b8', marginBottom: 16, cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.secret} onChange={e => setForm({...form, secret: e.target.checked})} />
-                Mark as secret (hidden in UI)
-              </label>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button onClick={() => setShowAdd(false)} style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Cancel</button>
-                <button onClick={handleAdd} style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Add</button>
-              </div>
-            </div>
+                  <div className="flex items-center gap-2">
+                    <code className="bg-gray-950 border border-gray-800 px-3 py-1 rounded text-xs font-mono text-gray-300 max-w-xs truncate">
+                      {env.secret && !isRevealed ? '••••••••••••' : env.value}
+                    </code>
+                    {env.secret && (
+                      <button
+                        onClick={() => setRevealed((prev) => ({ ...prev, [env.key]: !prev[env.key] }))}
+                        className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs text-gray-300"
+                      >
+                        {isRevealed ? 'Hide' : 'Reveal'}
+                      </button>
+                    )}
+                    {confirmDeleteKey === env.key ? (
+                      <>
+                        <button
+                          onClick={() => handleDelete(env.key)}
+                          className="px-2.5 py-1 bg-red-600 text-white rounded text-xs font-medium"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteKey(null)}
+                          className="px-2.5 py-1 bg-gray-800 text-gray-300 rounded text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDeleteKey(env.key)}
+                        className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-colors"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
+
+      {/* Add Modal */}
+      {showAdd && (
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowAdd(false)}
+        >
+          <form
+            onSubmit={handleAdd}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gray-900 border border-gray-800 rounded-2xl p-6 max-w-md w-full space-y-4"
+          >
+            <h3 className="text-xl font-bold">Add Environment Variable</h3>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Key</label>
+              <input
+                value={form.key}
+                onChange={(e) => setForm({ ...form, key: e.target.value })}
+                placeholder="DATABASE_URL"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-kathal-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Value</label>
+              <input
+                value={form.value}
+                onChange={(e) => setForm({ ...form, value: e.target.value })}
+                placeholder="postgresql://..."
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-kathal-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Description (optional)</label>
+              <input
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Production database URL"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-kathal-500 focus:outline-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.secret}
+                onChange={(e) => setForm({ ...form, secret: e.target.checked })}
+                className="w-4 h-4 accent-kathal-500"
+              />
+              Mark as secret (masked by default)
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAdd(false)}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium"
+              >
+                Save Variable
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

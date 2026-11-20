@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { apiFetch, apiPost, apiDelete } from '../hooks/useApi'
 
 export default function Network() {
@@ -10,326 +10,362 @@ export default function Network() {
   const [showCreateVolume, setShowCreateVolume] = useState(false)
   const [netForm, setNetForm] = useState({ name: '', driver: 'bridge', internal: false, attachable: true, enableIPv6: false })
   const [volForm, setVolForm] = useState({ name: '', driver: 'local' })
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmPrune, setConfirmPrune] = useState(false)
+  const [feedback, setFeedback] = useState(null)
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [nets, vols] = await Promise.all([apiFetch('/network'), apiFetch('/volumes')])
+      setNetworks(Array.isArray(nets) ? nets : [])
+      setVolumes(Array.isArray(vols) ? vols : [])
+    } catch {
+      // keep existing
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     loadData()
-  }, [tab])
+  }, [loadData])
 
-  async function loadData() {
-    setLoading(true)
+  async function createNetwork(e) {
+    e.preventDefault()
+    setFeedback(null)
     try {
-      if (tab === 'networks') {
-        const data = await apiFetch('/api/v1/network')
-        setNetworks(data || [])
-      } else {
-        const data = await apiFetch('/api/v1/volumes')
-        setVolumes(data || [])
-      }
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  async function createNetwork() {
-    try {
-      await apiPost('/api/v1/network', netForm)
+      await apiPost('/network', netForm)
       setShowCreateNetwork(false)
+      setFeedback({ type: 'success', text: `Created network "${netForm.name}".` })
       setNetForm({ name: '', driver: 'bridge', internal: false, attachable: true, enableIPv6: false })
       loadData()
-    } catch (e) {
-      alert('Failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to create network' })
     }
   }
 
-  async function createVolume() {
+  async function createVolume(e) {
+    e.preventDefault()
+    setFeedback(null)
     try {
-      await apiPost('/api/v1/volumes', volForm)
+      const vol = await apiPost('/volumes', volForm)
       setShowCreateVolume(false)
+      setFeedback({ type: 'success', text: `Created volume "${vol.name}".` })
       setVolForm({ name: '', driver: 'local' })
       loadData()
-    } catch (e) {
-      alert('Failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to create volume' })
     }
   }
 
   async function deleteNetwork(name) {
-    if (!confirm('Delete network "' + name + '"?')) return
+    setFeedback(null)
     try {
-      await apiDelete('/api/v1/network/' + name)
+      await apiDelete('/network/' + encodeURIComponent(name))
+      setConfirmDelete(null)
+      setFeedback({ type: 'success', text: `Deleted network "${name}".` })
       loadData()
-    } catch (e) {
-      alert('Delete failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Delete failed' })
     }
   }
 
   async function deleteVolume(name) {
-    if (!confirm('Delete volume "' + name + '"?')) return
+    setFeedback(null)
     try {
-      await apiDelete('/api/v1/volumes/' + name)
+      await apiDelete('/volumes/' + encodeURIComponent(name))
+      setConfirmDelete(null)
+      setFeedback({ type: 'success', text: `Deleted volume "${name}".` })
       loadData()
-    } catch (e) {
-      alert('Delete failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Delete failed' })
     }
   }
 
   async function pruneNetworks() {
-    if (!confirm('Remove all unused networks?')) return
+    setFeedback(null)
     try {
-      await apiPost('/api/v1/network/prune')
+      const res = await apiPost('/network/prune', {})
+      setConfirmPrune(false)
+      setFeedback({ type: 'success', text: `Pruned ${res.networks_deleted || 0} unused network(s).` })
       loadData()
-    } catch (e) {
-      alert('Prune failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Prune failed' })
     }
   }
 
   async function pruneVolumes() {
-    if (!confirm('Remove all unused volumes?')) return
+    setFeedback(null)
     try {
-      await apiPost('/api/v1/volumes/prune')
+      const res = await apiPost('/volumes/prune', {})
+      setConfirmPrune(false)
+      const mb = Math.round((res.space_reclaimed_bytes || 0) / 1048576)
+      setFeedback({ type: 'success', text: `Pruned unused volumes (${mb} MB reclaimed).` })
       loadData()
-    } catch (e) {
-      alert('Prune failed: ' + e.message)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Prune failed' })
     }
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <div className="p-8">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Networks &amp; Volumes</h1>
+        <p className="text-gray-500 mt-1">Manage isolated container networks and persistent storage volumes</p>
+      </div>
+
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#1e293b', padding: 4, borderRadius: 8 }}>
-        <button onClick={() => setTab('networks')} style={tabStyle(tab === 'networks')}>
+      <div className="flex gap-1 bg-gray-900 border border-gray-800 p-1 rounded-xl mb-6">
+        <button
+          onClick={() => { setTab('networks'); setConfirmDelete(null); setConfirmPrune(false) }}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            tab === 'networks' ? 'bg-kathal-600 text-white' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
           🌐 Networks ({networks.length})
         </button>
-        <button onClick={() => setTab('volumes')} style={tabStyle(tab === 'volumes')}>
+        <button
+          onClick={() => { setTab('volumes'); setConfirmDelete(null); setConfirmPrune(false) }}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+            tab === 'volumes' ? 'bg-kathal-600 text-white' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
           💾 Volumes ({volumes.length})
         </button>
       </div>
 
-      {tab === 'networks' ? (
-        <NetworksView
-          networks={networks}
-          loading={loading}
-          onRefresh={loadData}
-          onCreate={createNetwork}
-          onDelete={deleteNetwork}
-          showCreate={showCreateNetwork}
-          setShowCreate={setShowCreateNetwork}
-          form={netForm}
-          setForm={setNetForm}
-          onPrune={pruneNetworks}
-        />
-      ) : (
-        <VolumesView
-          volumes={volumes}
-          loading={loading}
-          onRefresh={loadData}
-          onCreate={createVolume}
-          onDelete={deleteVolume}
-          showCreate={showCreateVolume}
-          setShowCreate={setShowCreateVolume}
-          form={volForm}
-          setForm={setVolForm}
-          onPrune={pruneVolumes}
-        />
+      {feedback && (
+        <div
+          className={`mb-4 p-3 rounded-lg border text-sm ${
+            feedback.type === 'error'
+              ? 'bg-red-600/10 border-red-600/30 text-red-400'
+              : 'bg-green-600/10 border-green-600/30 text-green-400'
+          }`}
+        >
+          {feedback.text}
+        </div>
       )}
-    </div>
-  )
-}
 
-function tabStyle(active) {
-  return {
-    flex: 1,
-    padding: '10px 16px',
-    border: 'none',
-    borderRadius: 6,
-    background: active ? '#3b82f6' : 'transparent',
-    color: active ? 'white' : '#94a3b8',
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: 500,
-    transition: 'all 0.2s'
-  }
-}
-
-function NetworksView({ networks, loading, onRefresh, onCreate, onDelete, showCreate, setShowCreate, form, setForm, onPrune }) {
-  return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <button onClick={onRefresh} disabled={loading}
-          style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: '#94a3b8', cursor: 'pointer' }}>
-          Refresh
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <button
+          onClick={loadData}
+          disabled={loading}
+          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 disabled:opacity-50"
+        >
+          🔄 Refresh
         </button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onPrune}
-            style={{ padding: '8px 16px', background: '#ef4444', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 13 }}>
-            Prune Unused
-          </button>
-          <button onClick={() => setShowCreate(true)}
-            style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>
-            + Create Network
+        <div className="flex items-center gap-2">
+          {confirmPrune ? (
+            <>
+              <button
+                onClick={tab === 'networks' ? pruneNetworks : pruneVolumes}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium"
+              >
+                Confirm Prune Unused
+              </button>
+              <button
+                onClick={() => setConfirmPrune(false)}
+                className="px-3 py-2 bg-gray-800 text-gray-300 rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmPrune(true)}
+              className="px-4 py-2 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded-lg text-sm transition-colors"
+            >
+              Prune Unused
+            </button>
+          )}
+          <button
+            onClick={() => (tab === 'networks' ? setShowCreateNetwork(true) : setShowCreateVolume(true))}
+            className="px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium"
+          >
+            {tab === 'networks' ? '+ Create Network' : '+ Create Volume'}
           </button>
         </div>
       </div>
 
-      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading...</div>
-        ) : networks.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#64748b' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🌐</div>
-            <p>No networks found</p>
-          </div>
-        ) : (
-          <div style={{ overflow: 'auto' }}>
-            {networks.map(n => (
-              <div key={n.id} style={{ display: 'flex', alignItems: 'center', padding: '16px', borderBottom: '1px solid #334155' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code style={{ background: '#0f172a', padding: '4px 10px', borderRadius: 6, fontSize: 13 }}>
+      {tab === 'networks' ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl divide-y divide-gray-800">
+          {loading ? (
+            <div className="p-10 text-center text-gray-500">Loading networks...</div>
+          ) : networks.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">No networks found</div>
+          ) : (
+            networks.map((n) => (
+              <div key={n.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="bg-gray-950 border border-gray-800 px-2.5 py-1 rounded text-sm font-mono text-gray-100">
                       {n.name}
                     </code>
-                    <span style={{ background: n.internal ? '#ef4444' : '#22c55e', color: 'white', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>
-                      {n.driver}
-                    </span>
-                    {n.internal && <span style={{ background: '#f59e0b', color: 'white', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>Internal</span>}
-                    {n.attachable && <span style={{ background: '#8b5cf6', color: 'white', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>Attachable</span>}
-                    {n.ingress && <span style={{ background: '#06b6d4', color: 'white', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>Ingress</span>}
+                    <span className="bg-green-600/20 text-green-400 px-2 py-0.5 rounded text-xs">{n.driver}</span>
+                    {n.internal && <span className="bg-yellow-600/20 text-yellow-400 px-2 py-0.5 rounded text-xs">Internal</span>}
+                    {n.attachable && <span className="bg-purple-600/20 text-purple-400 px-2 py-0.5 rounded text-xs">Attachable</span>}
                   </div>
-                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                  <p className="text-xs text-gray-500 mt-1">
                     ID: {n.id} · Scope: {n.scope} · {n.containers?.length || 0} containers
                   </p>
                 </div>
-                <button onClick={() => deleteNetwork(n.name)}
-                  style={{ padding: '6px 12px', background: '#ef4444', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 12 }}>
-                  Delete
-                </button>
+                <div className="flex items-center gap-2">
+                  {confirmDelete === `net:${n.name}` ? (
+                    <>
+                      <button onClick={() => deleteNetwork(n.name)} className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium">
+                        Confirm
+                      </button>
+                      <button onClick={() => setConfirmDelete(null)} className="px-2.5 py-1 bg-gray-800 text-gray-300 rounded text-xs">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(`net:${n.name}`)}
+                      className="px-3 py-1 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl divide-y divide-gray-800">
+          {loading ? (
+            <div className="p-10 text-center text-gray-500">Loading volumes...</div>
+          ) : volumes.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">No volumes found</div>
+          ) : (
+            volumes.map((v) => (
+              <div key={v.name} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <code className="bg-gray-950 border border-gray-800 px-2.5 py-1 rounded text-sm font-mono text-gray-100">
+                      {v.name}
+                    </code>
+                    <span className="bg-blue-600/20 text-blue-400 px-2 py-0.5 rounded text-xs">{v.driver}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Mountpoint: {v.mountpoint} · Scope: {v.scope}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {confirmDelete === `vol:${v.name}` ? (
+                    <>
+                      <button onClick={() => deleteVolume(v.name)} className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium">
+                        Confirm
+                      </button>
+                      <button onClick={() => setConfirmDelete(null)} className="px-2.5 py-1 bg-gray-800 text-gray-300 rounded text-xs">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(`vol:${v.name}`)}
+                      className="px-3 py-1 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded text-xs transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
-      {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setShowCreate(false)}>
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: 32, width: 480, maxWidth: '90%' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 20px' }}>Create Network</h3>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Name</label>
-              <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="my-network"
-                style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }} />
+      {/* Create Network Modal */}
+      {showCreateNetwork && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowCreateNetwork(false)}>
+          <form onSubmit={createNetwork} onClick={(e) => e.stopPropagation()} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 max-w-md w-full space-y-4">
+            <h3 className="text-xl font-bold">Create Network</h3>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Name</label>
+              <input
+                value={netForm.name}
+                onChange={(e) => setNetForm({ ...netForm, name: e.target.value })}
+                placeholder="my-network"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-kathal-500 focus:outline-none"
+                required
+              />
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Driver</label>
-              <select value={form.driver} onChange={e => setForm({...form, driver: e.target.value})}
-                style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }}>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Driver</label>
+              <select
+                value={netForm.driver}
+                onChange={(e) => setNetForm({ ...netForm, driver: e.target.value })}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-kathal-500 focus:outline-none"
+              >
                 <option value="bridge">bridge</option>
                 <option value="overlay">overlay</option>
                 <option value="macvlan">macvlan</option>
                 <option value="ipvlan">ipvlan</option>
               </select>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#94a3b8', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.internal} onChange={e => setForm({...form, internal: e.target.checked})} /> Internal
+            <div className="flex gap-4 text-xs text-gray-300">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={netForm.internal} onChange={(e) => setNetForm({ ...netForm, internal: e.target.checked })} />
+                Internal
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#94a3b8', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.attachable} onChange={e => setForm({...form, attachable: e.target.checked})} /> Attachable
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#94a3b8', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.enableIPv6} onChange={e => setForm({...form, enableIPv6: e.target.checked})} /> Enable IPv6
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={netForm.attachable} onChange={(e) => setNetForm({ ...netForm, attachable: e.target.checked })} />
+                Attachable
               </label>
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowCreate(false)} style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={onCreate} style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Create</button>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setShowCreateNetwork(false)} className="px-4 py-2 bg-gray-800 rounded-lg text-sm text-gray-300">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium">
+                Create
+              </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
-    </>
-  )
-}
 
-function VolumesView({ volumes, loading, onRefresh, onCreate, onDelete, showCreate, setShowCreate, form, setForm, onPrune }) {
-  return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <button onClick={onRefresh} disabled={loading}
-          style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: '#94a3b8', cursor: 'pointer' }}>
-          Refresh
-        </button>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onPrune}
-            style={{ padding: '8px 16px', background: '#ef4444', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 13 }}>
-            Prune Unused
-          </button>
-          <button onClick={() => setShowCreate(true)}
-            style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>
-            + Create Volume
-          </button>
-        </div>
-      </div>
-
-      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading...</div>
-        ) : volumes.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#64748b' }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>💾</div>
-            <p>No volumes found</p>
-          </div>
-        ) : (
-          <div style={{ overflow: 'auto' }}>
-            {volumes.map(v => (
-              <div key={v.name} style={{ display: 'flex', alignItems: 'center', padding: '16px', borderBottom: '1px solid #334155' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <code style={{ background: '#0f172a', padding: '4px 10px', borderRadius: 6, fontSize: 13 }}>
-                      {v.name}
-                    </code>
-                    <span style={{ background: '#3b82f6', color: 'white', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>
-                      {v.driver}
-                    </span>
-                  </div>
-                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
-                    Mountpoint: {v.mountpoint} · Scope: {v.scope}
-                  </p>
-                </div>
-                <button onClick={() => deleteVolume(v.name)}
-                  style={{ padding: '6px 12px', background: '#ef4444', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 12 }}>
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setShowCreate(false)}>
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: 32, width: 480, maxWidth: '90%' }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 20px' }}>Create Volume</h3>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Name (optional)</label>
-              <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="auto-generated if empty"
-                style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }} />
+      {/* Create Volume Modal */}
+      {showCreateVolume && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowCreateVolume(false)}>
+          <form onSubmit={createVolume} onClick={(e) => e.stopPropagation()} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 max-w-md w-full space-y-4">
+            <h3 className="text-xl font-bold">Create Volume</h3>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Name (optional)</label>
+              <input
+                value={volForm.name}
+                onChange={(e) => setVolForm({ ...volForm, name: e.target.value })}
+                placeholder="auto-generated if empty"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-kathal-500 focus:outline-none"
+              />
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>Driver</label>
-              <select value={form.driver} onChange={e => setForm({...form, driver: e.target.value})}
-                style={{ width: '100%', padding: '8px 12px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }}>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Driver</label>
+              <select
+                value={volForm.driver}
+                onChange={(e) => setVolForm({ ...volForm, driver: e.target.value })}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-kathal-500 focus:outline-none"
+              >
                 <option value="local">local</option>
                 <option value="nfs">nfs</option>
                 <option value="tmpfs">tmpfs</option>
               </select>
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowCreate(false)} style={{ padding: '8px 16px', background: '#334155', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={onCreate} style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>Create</button>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setShowCreateVolume(false)} className="px-4 py-2 bg-gray-800 rounded-lg text-sm text-gray-300">
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium">
+                Create
+              </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
-    </>
+    </div>
   )
 }

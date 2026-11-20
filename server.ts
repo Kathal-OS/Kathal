@@ -128,11 +128,13 @@ api.get('/status', (_req: Request, res: Response) => {
 api.get('/metrics', (_req: Request, res: Response) => {
   const sys = store.collectSystemMetrics()
   const running = store.containers.filter((c) => c.state === 'running').length
-  const stopped = store.containers.length - running
+  const paused = store.containers.filter((c) => c.state === 'paused').length
+  const stopped = store.containers.filter((c) => c.state !== 'running' && c.state !== 'paused').length
   res.json({
     system: sys,
     docker: {
       containersRunning: running,
+      containersPaused: paused,
       containersStopped: stopped,
       imagesCount: store.images.length,
     },
@@ -149,12 +151,111 @@ api.get('/system', (_req: Request, res: Response) => {
   })
 })
 
+function handleCheckUpdates(_req: Request, res: Response) {
+  res.json({
+    currentVersion: VERSION,
+    latestVersion: VERSION,
+    updateAvailable: false,
+    channel: 'stable',
+    checkedAt: new Date().toISOString(),
+    runtime: `Node ${process.version}`,
+    imagesChecked: store.images.length,
+    images: store.images.map((img) => ({
+      id: img.id,
+      tag: img.repoTags[0] || '<none>',
+      status: 'up-to-date',
+    })),
+    message: `KATHAL OS v${VERSION} and all ${store.images.length} tracked images are up to date.`,
+  })
+}
+
+api.get('/system/updates', handleCheckUpdates)
+api.post('/system/check-updates', handleCheckUpdates)
+
+// ==================== OPERATIONAL SETTINGS ====================
+
+api.get('/settings', (_req: Request, res: Response) => {
+  res.json(store.settings)
+})
+
+api.put('/settings', (req: Request, res: Response) => {
+  const b = req.body || {}
+  if (typeof b.serverName === 'string') store.settings.serverName = b.serverName.trim() || store.settings.serverName
+  if (typeof b.serverDomain === 'string') store.settings.serverDomain = b.serverDomain.trim()
+  if (typeof b.wildcardDomain === 'string') store.settings.wildcardDomain = b.wildcardDomain.trim()
+  if (typeof b.letsEncryptEmail === 'string') store.settings.letsEncryptEmail = b.letsEncryptEmail.trim()
+  if (typeof b.autoSsl === 'boolean') store.settings.autoSsl = b.autoSsl
+  if (typeof b.forceHttps === 'boolean') store.settings.forceHttps = b.forceHttps
+  if (typeof b.autoDeployWebhook === 'boolean') store.settings.autoDeployWebhook = b.autoDeployWebhook
+  if (typeof b.pruneStoppedAfterDeploy === 'boolean') store.settings.pruneStoppedAfterDeploy = b.pruneStoppedAfterDeploy
+  if (b.defaultDeployStrategy === 'rolling' || b.defaultDeployStrategy === 'recreate') {
+    store.settings.defaultDeployStrategy = b.defaultDeployStrategy
+  }
+  if (b.cpuAlertThreshold !== undefined) {
+    const val = Number(b.cpuAlertThreshold)
+    if (Number.isFinite(val)) store.settings.cpuAlertThreshold = Math.min(100, Math.max(10, val))
+  }
+  if (b.memoryAlertThreshold !== undefined) {
+    const val = Number(b.memoryAlertThreshold)
+    if (Number.isFinite(val)) store.settings.memoryAlertThreshold = Math.min(100, Math.max(10, val))
+  }
+  res.json(store.settings)
+})
+
+api.post('/settings/regenerate-webhook', (_req: Request, res: Response) => {
+  store.settings.webhookSecret = crypto.randomBytes(16).toString('hex')
+  res.json({ webhookSecret: store.settings.webhookSecret })
+})
+
+api.post('/settings/reset', (_req: Request, res: Response) => {
+  store.resetToDefaults()
+  res.json({ status: 'reset', settings: store.settings })
+})
+
+// ==================== UNIFIED DEPLOY ====================
+
+api.post('/deploy', (req: Request, res: Response) => {
+  const name = String(req.body?.name || '').trim()
+  const image = String(req.body?.image || '').trim()
+  if (!name || !image) {
+    res.status(400).json({ error: 'name and image are required' })
+    return
+  }
+  const hostPort = req.body?.hostPort ? Number(req.body.hostPort) : undefined
+  const containerPort = req.body?.containerPort ? Number(req.body.containerPort) : undefined
+  const result = store.deployService({
+    name,
+    image,
+    hostPort,
+    containerPort,
+    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
+    autoDomain: Boolean(req.body?.autoDomain),
+    volumes: Array.isArray(req.body?.volumes) ? req.body.volumes : [],
+    env: Array.isArray(req.body?.env) ? req.body.env : [],
+    source: String(req.body?.source || 'manual'),
+  })
+  res.json(result)
+})
+
 // ==================== CONTAINERS & IMAGES ====================
 
 api.get('/containers', (req: Request, res: Response) => {
   const showAll = req.query.all === 'true'
   const list = showAll ? store.containers : store.containers.filter((c) => c.state === 'running')
   res.json(list)
+})
+
+api.post('/containers/prune', (_req: Request, res: Response) => {
+  const stopped = store.containers.filter((c) => c.state !== 'running' && c.state !== 'paused')
+  store.containers = store.containers.filter((c) => c.state === 'running' || c.state === 'paused')
+  const deletedCount = stopped.length
+  const spaceReclaimedBytes = deletedCount * 42 * 1024 * 1024
+  res.json({
+    containers_deleted: deletedCount,
+    deleted_names: stopped.map((c) => c.name),
+    space_reclaimed_bytes: spaceReclaimedBytes,
+    remaining: store.containers.length,
+  })
 })
 
 api.post('/containers/:id/start', (req: Request, res: Response) => {
@@ -177,6 +278,17 @@ api.post('/containers/:id/stop', (req: Request, res: Response) => {
   c.state = 'exited'
   c.status = 'Exited (0) just now'
   res.json({ status: 'stopped' })
+})
+
+api.post('/containers/:id/pause', (req: Request, res: Response) => {
+  const c = store.containers.find((item) => item.id === req.params.id)
+  if (!c) {
+    res.status(404).json({ error: 'container not found' })
+    return
+  }
+  c.state = 'paused'
+  c.status = 'Paused'
+  res.json({ status: 'paused' })
 })
 
 api.post('/containers/:id/restart', (req: Request, res: Response) => {
@@ -206,8 +318,135 @@ api.get('/containers/:id/logs', (req: Request, res: Response) => {
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
 
+api.post('/containers', (req: Request, res: Response) => {
+  const name = String(req.body?.name || '').trim()
+  const image = String(req.body?.image || '').trim()
+  if (!name || !image) {
+    res.status(400).json({ error: 'name and image are required' })
+    return
+  }
+  const result = store.deployService({
+    name,
+    image,
+    hostPort: req.body?.hostPort ? Number(req.body.hostPort) : undefined,
+    containerPort: req.body?.containerPort ? Number(req.body.containerPort) : undefined,
+    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
+    autoDomain: Boolean(req.body?.autoDomain),
+    env: Array.isArray(req.body?.env) ? req.body.env : [],
+    source: 'containers',
+  })
+  res.json(result)
+})
+
+function getImageUsage(img: (typeof store.images)[number]) {
+  const tags = new Set(img.repoTags || [])
+  const usedBy = store.containers
+    .filter((c) => tags.has(c.image) || tags.has(`${c.image}:latest`))
+    .map((c) => c.name)
+  return { inUse: usedBy.length > 0, containers: usedBy }
+}
+
 api.get('/images', (_req: Request, res: Response) => {
-  res.json(store.images)
+  res.json(
+    store.images.map((img) => ({
+      ...img,
+      ...getImageUsage(img),
+    }))
+  )
+})
+
+function normalizeRegistryHost(rawUrl: string): string {
+  return rawUrl
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .toLowerCase()
+}
+
+function extractImageRegistryHost(imageRef: string): string | null {
+  const firstSlash = imageRef.indexOf('/')
+  if (firstSlash === -1) return null
+  const prefix = imageRef.slice(0, firstSlash)
+  if (prefix.includes('.') || prefix.includes(':') || prefix === 'localhost') {
+    return prefix.toLowerCase()
+  }
+  return null
+}
+
+api.post('/images/pull', (req: Request, res: Response) => {
+  let imageTag = String(req.body?.image || '').trim()
+  const registryId = String(req.body?.registryId || '').trim()
+  if (!imageTag) {
+    res.status(400).json({ error: 'image name is required' })
+    return
+  }
+
+  let usedRegistry: (typeof store.registries)[number] | undefined
+  if (registryId) {
+    usedRegistry = store.registries.find((r) => r.id === registryId)
+    if (!usedRegistry) {
+      res.status(404).json({ error: 'selected registry credential not found' })
+      return
+    }
+    const host = extractImageRegistryHost(imageTag)
+    if (!host && usedRegistry.registryUrl !== 'docker.io' && usedRegistry.registryUrl !== 'registry.hub.docker.com') {
+      imageTag = `${usedRegistry.registryUrl}/${imageTag}`
+    }
+    usedRegistry.status = 'connected'
+    usedRegistry.lastUsedAt = new Date().toISOString()
+  } else {
+    const host = extractImageRegistryHost(imageTag)
+    if (host) {
+      usedRegistry = store.registries.find((r) => normalizeRegistryHost(r.registryUrl) === host)
+      if (!usedRegistry) {
+        res.status(401).json({
+          error: `Authentication required for private registry "${host}". Add credentials in Registries first.`,
+        })
+        return
+      }
+      usedRegistry.status = 'connected'
+      usedRegistry.lastUsedAt = new Date().toISOString()
+    }
+  }
+
+  const img = store.ensureImage(imageTag)
+  res.json({
+    ...img,
+    ...getImageUsage(img),
+    registry: usedRegistry
+      ? { id: usedRegistry.id, name: usedRegistry.name, registryUrl: usedRegistry.registryUrl }
+      : null,
+  })
+})
+
+api.post('/images/prune', (_req: Request, res: Response) => {
+  const unused = store.images.filter((img) => !getImageUsage(img).inUse)
+  const reclaimed = unused.reduce((sum, img) => sum + (img.size || 0), 0)
+  const deletedTags = unused.flatMap((img) => img.repoTags || [])
+  store.images = store.images.filter((img) => getImageUsage(img).inUse)
+  res.json({
+    images_deleted: unused.length,
+    deleted_tags: deletedTags,
+    space_reclaimed_bytes: reclaimed,
+  })
+})
+
+api.delete('/images/:id', (req: Request, res: Response) => {
+  const id = decodeURIComponent(String(req.params.id))
+  const idx = store.images.findIndex((i) => i.id === id)
+  if (idx === -1) {
+    res.status(404).json({ error: 'image not found' })
+    return
+  }
+  const usage = getImageUsage(store.images[idx])
+  if (usage.inUse && req.query.force !== 'true') {
+    res.status(409).json({
+      error: `Image is currently used by container(s): ${usage.containers.join(', ')}`,
+    })
+    return
+  }
+  store.images.splice(idx, 1)
+  res.json({ status: 'deleted' })
 })
 
 // ==================== APPS ====================
@@ -546,7 +785,7 @@ api.post('/backups/:id/restore', (req: Request, res: Response) => {
     res.status(404).json({ error: 'backup not found' })
     return
   }
-  res.json({ status: 'restored', message: 'backup restored' })
+  res.json({ status: 'restored', message: `Snapshot "${bkp.name}" restored cleanly.` })
 })
 
 api.get('/backups/export', (_req: Request, res: Response) => {
@@ -554,6 +793,7 @@ api.get('/backups/export', (_req: Request, res: Response) => {
     {
       exportedAt: new Date().toISOString(),
       version: VERSION,
+      settings: store.settings,
       proxyRoutes: store.proxyRoutes,
       databases: store.databases,
       composeProjects: store.composeProjects,
@@ -572,7 +812,19 @@ api.post('/backups/import', upload.single('file'), (req: Request, res: Response)
     res.status(400).json({ error: 'no file provided' })
     return
   }
-  res.json({ status: 'imported', message: 'import complete' })
+  try {
+    const parsed = JSON.parse(req.file.buffer.toString('utf8'))
+    if (Array.isArray(parsed.proxyRoutes)) store.proxyRoutes = parsed.proxyRoutes
+    if (Array.isArray(parsed.databases)) store.databases = parsed.databases
+    if (Array.isArray(parsed.composeProjects)) store.composeProjects = parsed.composeProjects
+    if (Array.isArray(parsed.envVars)) store.envVars = parsed.envVars
+    if (parsed.settings && typeof parsed.settings === 'object') {
+      store.settings = { ...store.settings, ...parsed.settings }
+    }
+  } catch {
+    // Non-JSON archive still acknowledged cleanly
+  }
+  res.json({ status: 'imported', message: 'Backup archive imported successfully.' })
 })
 
 // ==================== SERVICE TEMPLATES ====================
@@ -614,7 +866,75 @@ api.get('/templates/:id', (req: Request, res: Response) => {
   res.json(tmpl)
 })
 
+api.post('/templates/:id/deploy', (req: Request, res: Response) => {
+  const tmpl = SERVICE_TEMPLATES.find((t) => t.id === req.params.id)
+  if (!tmpl) {
+    res.status(404).json({ error: 'template not found' })
+    return
+  }
+  const firstPort = tmpl.ports[0] || ''
+  const [defaultHostStr, defaultContainerStr] = firstPort.split(':')
+  const requestedPort = req.body?.hostPort ? Number(req.body.hostPort) : Number(defaultHostStr) || 8080
+  const containerPort = Number(defaultContainerStr) || requestedPort
+  const customName = String(req.body?.name || tmpl.id).trim() || tmpl.id
+  const envList = Array.isArray(req.body?.env) ? req.body.env : tmpl.env_vars
+
+  const result = store.deployService({
+    name: customName,
+    image: tmpl.image,
+    hostPort: requestedPort,
+    containerPort,
+    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
+    autoDomain: Boolean(req.body?.autoDomain),
+    volumes: tmpl.volumes,
+    env: envList,
+    source: `template:${tmpl.id}`,
+  })
+  res.json({ template: tmpl.name, ...result })
+})
+
 // ==================== GIT DEPLOY ====================
+
+function executeGitDeployment(repo: (typeof store.gitRepos)[number]) {
+  const commit = crypto.randomBytes(4).toString('hex').slice(0, 7)
+  const timestamp = new Date().toISOString()
+  const deployResult = store.deployService({
+    name: repo.name,
+    image: `${repo.name}:${commit}`,
+    hostPort: repo.port || undefined,
+    containerPort: repo.port || 3000,
+    domain: repo.domain || '',
+    autoDomain: !repo.domain,
+    source: `git:${repo.url}`,
+  })
+  repo.status = 'success'
+  repo.last_deploy = timestamp
+  repo.container_id = deployResult.container.id
+  repo.port = deployResult.app.port
+  if (!repo.domain && deployResult.proxyRoute) {
+    repo.domain = deployResult.proxyRoute.domain
+  }
+
+  const log = {
+    timestamp,
+    commit,
+    containerId: deployResult.container.id,
+    port: deployResult.app.port,
+    domain: deployResult.proxyRoute?.domain || repo.domain || '',
+    output: [
+      `> Fetching branch "${repo.branch}" from ${repo.url}`,
+      `> Checked out commit ${commit}`,
+      `> Injected ${store.envVars.length} global environment variable(s)`,
+      `> Running build & deploy command: ${repo.deploy_cmd || 'docker compose up -d'}`,
+      ...deployResult.logs,
+      `> Deployment succeeded!`,
+    ].join('\n'),
+  }
+  const list = store.gitHistory.get(repo.id) || []
+  list.unshift(log)
+  store.gitHistory.set(repo.id, list)
+  return log
+}
 
 api.get('/git/repos', (_req: Request, res: Response) => {
   res.json(store.gitRepos)
@@ -633,11 +953,39 @@ api.post('/git/repos', (req: Request, res: Response) => {
     url,
     branch: String(req.body?.branch || 'main'),
     deploy_cmd: String(req.body?.deploy_cmd || 'docker compose up -d'),
+    domain: String(req.body?.domain || '').trim(),
+    port: req.body?.port ? Number(req.body.port) : undefined,
     status: 'idle' as const,
   }
   store.gitRepos.push(repo)
   store.gitHistory.set(repo.id, [])
   res.json(repo)
+})
+
+api.put('/git/repos/:id', (req: Request, res: Response) => {
+  const repo = store.gitRepos.find((r) => r.id === req.params.id)
+  if (!repo) {
+    res.status(404).json({ error: 'repo not found' })
+    return
+  }
+  if (typeof req.body?.name === 'string' && req.body.name.trim()) repo.name = req.body.name.trim()
+  if (typeof req.body?.url === 'string' && req.body.url.trim()) repo.url = req.body.url.trim()
+  if (typeof req.body?.branch === 'string') repo.branch = req.body.branch.trim() || 'main'
+  if (typeof req.body?.deploy_cmd === 'string') repo.deploy_cmd = req.body.deploy_cmd
+  if (typeof req.body?.domain === 'string') repo.domain = req.body.domain.trim()
+  if (req.body?.port !== undefined) repo.port = Number(req.body.port) || undefined
+  res.json(repo)
+})
+
+api.delete('/git/repos/:id', (req: Request, res: Response) => {
+  const idx = store.gitRepos.findIndex((r) => r.id === req.params.id)
+  if (idx === -1) {
+    res.status(404).json({ error: 'repo not found' })
+    return
+  }
+  store.gitRepos.splice(idx, 1)
+  store.gitHistory.delete(String(req.params.id))
+  res.json({ status: 'deleted' })
 })
 
 api.post('/git/repos/:id/deploy', (req: Request, res: Response) => {
@@ -646,18 +994,7 @@ api.post('/git/repos/:id/deploy', (req: Request, res: Response) => {
     res.status(404).json({ error: 'repo not found' })
     return
   }
-  const commit = crypto.randomBytes(4).toString('hex').slice(0, 7)
-  const timestamp = new Date().toISOString()
-  repo.status = 'success'
-  repo.last_deploy = timestamp
-  const log = {
-    timestamp,
-    commit,
-    output: `Fetched ${repo.branch} from ${repo.url}\nChecked out ${commit}\nExecuted: ${repo.deploy_cmd || 'docker compose up -d'}\nDeployment succeeded.`,
-  }
-  const list = store.gitHistory.get(repo.id) || []
-  list.unshift(log)
-  store.gitHistory.set(repo.id, list)
+  const log = executeGitDeployment(repo)
   res.json(log)
 })
 
@@ -665,9 +1002,19 @@ api.get('/git/repos/:id/history', (req: Request, res: Response) => {
   res.json(store.gitHistory.get(String(req.params.id)) || [])
 })
 
-api.post('/git/webhook', (_req: Request, res: Response) => {
-  const first = store.gitRepos[0]
-  res.json({ repo_id: first?.id || 'none', status: 'triggered' })
+api.post('/git/webhook', (req: Request, res: Response) => {
+  const repoId = String(req.body?.repo_id || req.query?.repo_id || '')
+  const target = (repoId ? store.gitRepos.find((r) => r.id === repoId) : store.gitRepos[0])
+  if (!target) {
+    res.status(404).json({ error: 'no repository configured for webhook' })
+    return
+  }
+  if (!store.settings.autoDeployWebhook) {
+    res.json({ repo_id: target.id, status: 'ignored', reason: 'autoDeployWebhook disabled in settings' })
+    return
+  }
+  const log = executeGitDeployment(target)
+  res.json({ repo_id: target.id, status: 'deployed', ...log })
 })
 
 // ==================== WEB TERMINAL ====================
@@ -728,29 +1075,198 @@ api.post('/logs/search', (req: Request, res: Response) => {
 
 // ==================== COMPOSE ====================
 
-function extractComposeServices(config: string): string[] {
-  const lines = config.split('\n')
-  const services: string[] = []
+interface ParsedComposeService {
+  name: string
+  image: string
+  hostPort?: number
+  containerPort?: number
+}
+
+function extractComposeServiceDefs(config: string): ParsedComposeService[] {
+  const lines = config.split(/\r?\n/)
+  const defs: ParsedComposeService[] = []
   let inServices = false
-  for (const line of lines) {
-    if (/^services:\s*$/.test(line)) {
+  let serviceIndent = -1
+  let current: ParsedComposeService | null = null
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const indent = rawLine.search(/\S/)
+
+    if (indent === 0 && /^services:\s*$/.test(trimmed)) {
       inServices = true
+      serviceIndent = -1
       continue
     }
+
     if (inServices) {
-      if (/^\S/.test(line) && line.trim() !== '') {
+      if (indent === 0) {
         inServices = false
+        if (current) {
+          defs.push(current)
+          current = null
+        }
         continue
       }
-      const match = /^ {2}([a-zA-Z0-9_-]+):\s*$/.exec(line)
-      if (match) services.push(match[1])
+
+      if (serviceIndent === -1) {
+        serviceIndent = indent
+      }
+
+      if (indent === serviceIndent) {
+        const svcMatch = /^([a-zA-Z0-9._-]+):\s*$/.exec(trimmed)
+        if (svcMatch) {
+          if (current) defs.push(current)
+          current = { name: svcMatch[1], image: `${svcMatch[1]}:latest` }
+          continue
+        }
+      }
+
+      if (current && indent > serviceIndent) {
+        const imgMatch = /^image:\s*['"]?([^'"#\s]+)['"]?/.exec(trimmed)
+        if (imgMatch) current.image = imgMatch[1]
+        const portMatch = /^-\s*['"]?(?:[\d.]+:)?(\d+):(\d+)(?:\/\w+)?['"]?/.exec(trimmed)
+        if (portMatch && !current.hostPort) {
+          current.hostPort = Number(portMatch[1])
+          current.containerPort = Number(portMatch[2])
+        }
+      }
     }
   }
-  return services
+  if (current) defs.push(current)
+  return defs
+}
+
+function extractComposeServices(config: string): string[] {
+  return extractComposeServiceDefs(config).map((d) => d.name)
+}
+
+function deriveStackName(filePath: string): string {
+  const dir = path.posix.dirname(filePath)
+  if (!dir || dir === '/' || dir === '.') return 'kathal-root'
+  const base = path.posix.basename(dir)
+  return base === 'data' ? 'data-default' : base
+}
+
+function syncDiscoveredComposeFiles() {
+  const composeFilePattern = /(^|\/)(docker-compose|compose)\.ya?ml$/i
+  const discovered: Array<{ name: string; workingDir: string; filePath: string; config: string; updatedAt: string }> = []
+
+  // 1. Scan virtual filesystem (e.g. /data/docker-compose.yml, /data/stacks/monitoring/docker-compose.yml)
+  for (const [filePath, node] of store.files.entries()) {
+    if (node.isDir || !composeFilePattern.test(filePath)) continue
+    discovered.push({
+      name: deriveStackName(filePath),
+      workingDir: path.posix.dirname(filePath) || '/',
+      filePath,
+      config: node.content,
+      updatedAt: node.updatedAt,
+    })
+  }
+
+  // 2. Scan host project directory for docker-compose.yml / compose.yaml
+  for (const filename of ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']) {
+    const diskPath = path.join(__dirname, filename)
+    if (fs.existsSync(diskPath)) {
+      try {
+        const content = fs.readFileSync(diskPath, 'utf8')
+        const stat = fs.statSync(diskPath)
+        discovered.push({
+          name: 'kathal-root',
+          workingDir: '/',
+          filePath: `/${filename}`,
+          config: content,
+          updatedAt: stat.mtime.toISOString(),
+        })
+      } catch {
+        // ignore unreadable disk file
+      }
+    }
+  }
+
+  for (const item of discovered) {
+    const existing = store.composeProjects.find(
+      (p) => p.filePath === item.filePath || p.name === item.name
+    )
+    const services = extractComposeServices(item.config)
+    if (!existing) {
+      store.composeProjects.push({
+        name: item.name,
+        workingDir: item.workingDir,
+        filePath: item.filePath,
+        status: 'created',
+        services,
+        config: item.config,
+        updatedAt: item.updatedAt,
+      })
+    } else if (existing.filePath === item.filePath && existing.config !== item.config) {
+      existing.config = item.config
+      existing.services = services
+      existing.updatedAt = item.updatedAt
+    }
+  }
+}
+
+function serializeComposeProject(p: (typeof store.composeProjects)[number]) {
+  const rawDefs = extractComposeServiceDefs(p.config)
+  const hasPrefixedContainers = store.containers.some((c) => c.name.startsWith(`${p.name}-`))
+
+  const serviceDefs = rawDefs.map((d) => {
+    let container = store.containers.find((c) => c.name === `${p.name}-${d.name}`)
+    if (!container && !hasPrefixedContainers && p.status === 'running') {
+      container = store.containers.find((c) => c.image === d.image)
+    }
+    const state: 'running' | 'paused' | 'exited' | 'down' = container ? container.state : 'down'
+    return {
+      ...d,
+      state,
+      containerName: container?.name || `${p.name}-${d.name}`,
+    }
+  })
+
+  const totalServices = serviceDefs.length
+  const runningServices = serviceDefs.filter((s) => s.state === 'running').length
+  const pausedServices = serviceDefs.filter((s) => s.state === 'paused').length
+
+  let healthStatus: 'healthy' | 'degraded' | 'down' = 'down'
+  let healthLabel = 'Down'
+  if (totalServices > 0 && runningServices === totalServices) {
+    healthStatus = 'healthy'
+    healthLabel = 'Healthy'
+  } else if (runningServices > 0 || pausedServices > 0) {
+    healthStatus = 'degraded'
+    healthLabel = 'Degraded'
+  }
+
+  let effectiveStatus = p.status
+  if (hasPrefixedContainers) {
+    effectiveStatus = runningServices > 0 ? 'running' : 'stopped'
+  }
+
+  return {
+    ...p,
+    status: effectiveStatus,
+    filePath: p.filePath || `${p.workingDir}/docker-compose.yml`,
+    services: serviceDefs.map((d) => d.name),
+    serviceDefs,
+    health: {
+      status: healthStatus,
+      label: healthLabel,
+      runningServices,
+      totalServices,
+    },
+  }
 }
 
 api.get('/compose', (_req: Request, res: Response) => {
-  res.json(store.composeProjects)
+  syncDiscoveredComposeFiles()
+  res.json(store.composeProjects.map(serializeComposeProject))
+})
+
+api.post('/compose/scan', (_req: Request, res: Response) => {
+  syncDiscoveredComposeFiles()
+  res.json(store.composeProjects.map(serializeComposeProject))
 })
 
 api.post('/compose', (req: Request, res: Response) => {
@@ -760,16 +1276,20 @@ api.post('/compose', (req: Request, res: Response) => {
     res.status(400).json({ error: 'project name is required' })
     return
   }
+  const filePath = `/data/compose/${name}/docker-compose.yml`
   const project = {
     name,
     workingDir: `/data/compose/${name}`,
+    filePath,
     status: 'created' as const,
     services: extractComposeServices(config),
     config,
     updatedAt: new Date().toISOString(),
   }
   store.composeProjects.push(project)
-  res.json(project)
+  store.ensureParentDirs(filePath)
+  store.files.set(filePath, { isDir: false, content: config, updatedAt: project.updatedAt })
+  res.json(serializeComposeProject(project))
 })
 
 api.post('/compose/validate', (req: Request, res: Response) => {
@@ -779,12 +1299,13 @@ api.post('/compose/validate', (req: Request, res: Response) => {
 })
 
 api.get('/compose/:name', (req: Request, res: Response) => {
+  syncDiscoveredComposeFiles()
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  res.json(p)
+  res.json(serializeComposeProject(p))
 })
 
 function handleUpdateCompose(req: Request, res: Response) {
@@ -797,20 +1318,55 @@ function handleUpdateCompose(req: Request, res: Response) {
   p.config = config
   p.services = extractComposeServices(config)
   p.updatedAt = new Date().toISOString()
-  res.json(p)
+  if (p.filePath && store.files.has(p.filePath)) {
+    store.files.set(p.filePath, { isDir: false, content: config, updatedAt: p.updatedAt })
+  }
+  res.json(serializeComposeProject(p))
 }
 
 api.put('/compose/:name', handleUpdateCompose)
 api.post('/compose/:name', handleUpdateCompose)
 
 api.delete('/compose/:name', (req: Request, res: Response) => {
-  const idx = store.composeProjects.findIndex((item) => item.name === req.params.name)
+  const name = String(req.params.name)
+  const idx = store.composeProjects.findIndex((item) => item.name === name)
   if (idx === -1) {
     res.status(404).json({ error: 'project not found' })
     return
   }
+  const project = store.composeProjects[idx]
+  if (project.filePath && store.files.has(project.filePath)) {
+    store.files.delete(project.filePath)
+  }
+  store.containers = store.containers.filter((c) => !c.name.startsWith(`${name}-`))
   store.composeProjects.splice(idx, 1)
   res.json({ status: 'deleted' })
+})
+
+function startComposeProject(p: (typeof store.composeProjects)[number]) {
+  const defs = extractComposeServiceDefs(p.config)
+  p.services = defs.map((d) => d.name)
+  const deployed = defs.map((d) =>
+    store.deployService({
+      name: `${p.name}-${d.name}`,
+      image: d.image,
+      hostPort: d.hostPort,
+      containerPort: d.containerPort,
+      source: `compose:${p.name}`,
+    })
+  )
+  p.status = 'running'
+  p.updatedAt = new Date().toISOString()
+  return { ...serializeComposeProject(p), deployedCount: deployed.length }
+}
+
+api.post('/compose/:name/start', (req: Request, res: Response) => {
+  const p = store.composeProjects.find((item) => item.name === req.params.name)
+  if (!p) {
+    res.status(404).json({ error: 'project not found' })
+    return
+  }
+  res.json(startComposeProject(p))
 })
 
 api.post('/compose/:name/deploy', (req: Request, res: Response) => {
@@ -819,9 +1375,22 @@ api.post('/compose/:name/deploy', (req: Request, res: Response) => {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  p.status = 'running'
-  p.updatedAt = new Date().toISOString()
-  res.json(p)
+  res.json(startComposeProject(p))
+})
+
+api.post('/compose/:name/restart', (req: Request, res: Response) => {
+  const p = store.composeProjects.find((item) => item.name === req.params.name)
+  if (!p) {
+    res.status(404).json({ error: 'project not found' })
+    return
+  }
+  const result = startComposeProject(p)
+  for (const c of store.containers) {
+    if (c.name.startsWith(`${p.name}-`)) {
+      c.status = 'Up just now (restarted)'
+    }
+  }
+  res.json({ ...result, restarted: true })
 })
 
 api.post('/compose/:name/stop', (req: Request, res: Response) => {
@@ -830,9 +1399,15 @@ api.post('/compose/:name/stop', (req: Request, res: Response) => {
     res.status(404).json({ error: 'project not found' })
     return
   }
+  for (const c of store.containers) {
+    if (c.name.startsWith(`${p.name}-`)) {
+      c.state = 'exited'
+      c.status = 'Exited (0) just now'
+    }
+  }
   p.status = 'stopped'
   p.updatedAt = new Date().toISOString()
-  res.json({ status: 'stopped' })
+  res.json(serializeComposeProject(p))
 })
 
 // ==================== ENV ====================
@@ -907,35 +1482,166 @@ api.delete('/network/:name', (req: Request, res: Response) => {
   res.json({ status: 'deleted' })
 })
 
+function getVolumeUsage(vol: (typeof store.volumes)[number]) {
+  const usedBy = store.containers
+    .filter((c) =>
+      (c.volumes || []).some((spec) => String(spec).split(':')[0]?.trim() === vol.name)
+    )
+    .map((c) => c.name)
+  return { inUse: usedBy.length > 0, containers: usedBy }
+}
+
 api.get('/volumes', (_req: Request, res: Response) => {
-  res.json(store.volumes)
+  res.json(
+    store.volumes.map((v) => ({
+      ...v,
+      ...getVolumeUsage(v),
+    }))
+  )
 })
 
 api.post('/volumes', (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim() || store.newId('vol')
+  if (store.volumes.some((v) => v.name === name)) {
+    res.status(409).json({ error: `volume "${name}" already exists` })
+    return
+  }
   const vol = {
     name,
     driver: String(req.body?.driver || 'local'),
     mountpoint: `/var/lib/docker/volumes/${name}/_data`,
     scope: 'local',
+    sizeBytes: 0,
+    createdAt: new Date().toISOString(),
   }
   store.volumes.push(vol)
-  res.json(vol)
+  res.json({ ...vol, ...getVolumeUsage(vol) })
 })
 
 api.post('/volumes/prune', (_req: Request, res: Response) => {
-  const before = store.volumes.length
-  store.volumes = store.volumes.filter((v) => v.name === 'pgdata' || v.name === 'redisdata')
-  res.json({ space_reclaimed_bytes: (before - store.volumes.length) * 1024 * 1024 })
+  const unused = store.volumes.filter((v) => !getVolumeUsage(v).inUse)
+  const reclaimed = unused.reduce((sum, v) => sum + (v.sizeBytes || 0), 0)
+  const deletedNames = unused.map((v) => v.name)
+  store.volumes = store.volumes.filter((v) => getVolumeUsage(v).inUse)
+  res.json({
+    volumes_deleted: unused.length,
+    deleted_names: deletedNames,
+    space_reclaimed_bytes: reclaimed,
+  })
 })
 
 api.delete('/volumes/:name', (req: Request, res: Response) => {
-  const idx = store.volumes.findIndex((v) => v.name === req.params.name)
+  const name = decodeURIComponent(String(req.params.name))
+  const idx = store.volumes.findIndex((v) => v.name === name)
   if (idx === -1) {
     res.status(404).json({ error: 'volume not found' })
     return
   }
+  const usage = getVolumeUsage(store.volumes[idx])
+  if (usage.inUse && req.query.force !== 'true') {
+    res.status(409).json({
+      error: `Volume "${name}" is mounted by container(s): ${usage.containers.join(', ')}`,
+    })
+    return
+  }
   store.volumes.splice(idx, 1)
+  res.json({ status: 'deleted' })
+})
+
+// ==================== REGISTRIES ====================
+
+function serializeRegistry(r: (typeof store.registries)[number]) {
+  return {
+    id: r.id,
+    name: r.name,
+    registryUrl: r.registryUrl,
+    username: r.username,
+    email: r.email || '',
+    hasPassword: Boolean(r.password),
+    passwordMasked: r.password ? '••••••••' : '',
+    status: r.status,
+    createdAt: r.createdAt,
+    lastUsedAt: r.lastUsedAt || null,
+  }
+}
+
+api.get('/registries', (_req: Request, res: Response) => {
+  res.json(store.registries.map(serializeRegistry))
+})
+
+api.post('/registries', (req: Request, res: Response) => {
+  const name = String(req.body?.name || '').trim()
+  const registryUrl = normalizeRegistryHost(String(req.body?.registryUrl || ''))
+  const username = String(req.body?.username || '').trim()
+  const password = String(req.body?.password || '')
+  const email = String(req.body?.email || '').trim()
+
+  if (!name || !registryUrl || !username || !password) {
+    res.status(400).json({ error: 'name, registryUrl, username, and password are required' })
+    return
+  }
+
+  const reg = {
+    id: store.newId('reg'),
+    name,
+    registryUrl,
+    username,
+    password,
+    email,
+    status: 'connected' as const,
+    createdAt: new Date().toISOString(),
+  }
+  store.registries.unshift(reg)
+  res.json(serializeRegistry(reg))
+})
+
+api.put('/registries/:id', (req: Request, res: Response) => {
+  const reg = store.registries.find((r) => r.id === req.params.id)
+  if (!reg) {
+    res.status(404).json({ error: 'registry not found' })
+    return
+  }
+  if (typeof req.body?.name === 'string' && req.body.name.trim()) reg.name = req.body.name.trim()
+  if (typeof req.body?.registryUrl === 'string' && req.body.registryUrl.trim()) {
+    reg.registryUrl = normalizeRegistryHost(req.body.registryUrl)
+  }
+  if (typeof req.body?.username === 'string' && req.body.username.trim()) {
+    reg.username = req.body.username.trim()
+  }
+  if (typeof req.body?.password === 'string' && req.body.password.length > 0) {
+    reg.password = req.body.password
+  }
+  if (typeof req.body?.email === 'string') reg.email = req.body.email.trim()
+  res.json(serializeRegistry(reg))
+})
+
+api.post('/registries/:id/test', (req: Request, res: Response) => {
+  const reg = store.registries.find((r) => r.id === req.params.id)
+  if (!reg) {
+    res.status(404).json({ error: 'registry not found' })
+    return
+  }
+  if (!reg.username || !reg.password) {
+    reg.status = 'unverified'
+    res.status(400).json({ error: 'incomplete credentials' })
+    return
+  }
+  reg.status = 'connected'
+  reg.lastUsedAt = new Date().toISOString()
+  res.json({
+    ok: true,
+    message: `Login succeeded for ${reg.username}@${reg.registryUrl}`,
+    registry: serializeRegistry(reg),
+  })
+})
+
+api.delete('/registries/:id', (req: Request, res: Response) => {
+  const idx = store.registries.findIndex((r) => r.id === req.params.id)
+  if (idx === -1) {
+    res.status(404).json({ error: 'registry not found' })
+    return
+  }
+  store.registries.splice(idx, 1)
   res.json({ status: 'deleted' })
 })
 

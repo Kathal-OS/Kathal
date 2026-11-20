@@ -1,149 +1,222 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../hooks/useApi'
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function formatPercent(p) {
+  return Number.isFinite(Number(p)) ? Number(p).toFixed(1) + '%' : 'N/A'
+}
+
+function Sparkline({ data, color, label }) {
+  const valid = (data || []).map((v) => Number(v)).filter((v) => Number.isFinite(v))
+  if (!valid.length) return null
+  const max = Math.max(...valid)
+  const min = Math.min(...valid)
+  const span = max - min || 1
+  const height = 60
+  const width = 300
+  const points = (valid.length === 1 ? [valid[0], valid[0]] : valid)
+    .map((v, i, arr) => {
+      const x = (i / (arr.length - 1)) * width
+      const y = height - ((v - min) / span) * (height - 8) - 4
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+
+  return (
+    <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-4">
+      <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+        <span>{label}</span>
+        <span className="tabular-nums font-medium text-gray-200">Latest: {valid[valid.length - 1]?.toFixed(1)}</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-16" preserveAspectRatio="none">
+        <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
+      </svg>
+    </div>
+  )
+}
 
 export default function Monitoring() {
   const [current, setCurrent] = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedContainer, setSelectedContainer] = useState(null)
+  const [containerLogs, setContainerLogs] = useState('')
+  const [logsLoading, setLogsLoading] = useState(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [curr, hist] = await Promise.all([
+        apiFetch('/monitoring/current'),
+        apiFetch('/monitoring/history'),
+      ])
+      setCurrent(curr)
+      setHistory(Array.isArray(hist) ? hist : [])
+    } catch {
+      // ignore transient error
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     loadData()
     const interval = setInterval(loadData, 2000)
     return () => clearInterval(interval)
-  }, [])
+  }, [loadData])
 
-  async function loadData() {
+  async function openContainerLogs(container) {
+    setSelectedContainer(container)
+    setLogsLoading(true)
+    setContainerLogs('')
     try {
-      const [curr, hist] = await Promise.all([
-        apiFetch('/api/v1/monitoring/current'),
-        apiFetch('/api/v1/monitoring/history'),
-      ])
-      setCurrent(curr)
-      setHistory(hist || [])
-      setLoading(false)
-    } catch (e) {
-      console.error(e)
-      setLoading(false)
+      const res = await apiFetch(`/containers/${container.id}/logs`)
+      setContainerLogs(res?.logs || 'No logs available')
+    } catch (err) {
+      setContainerLogs(`Failed to load logs: ${err.message}`)
+    } finally {
+      setLogsLoading(false)
     }
   }
 
-  function formatBytes(bytes) {
-    if (!bytes) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  function formatPercent(p) {
-    return p ? p.toFixed(1) + '%' : 'N/A'
-  }
-
-  const cpuColor = current?.cpu?.percent > 80 ? '#ef4444' : current?.cpu?.percent > 50 ? '#eab308' : '#22c55e'
-  const memColor = current?.memory?.percent > 80 ? '#ef4444' : current?.memory?.percent > 50 ? '#eab308' : '#22c55e'
+  const cpuPct = current?.cpu?.percent ?? 0
+  const memPct = current?.memory?.percent ?? 0
+  const cpuColor = cpuPct > 80 ? '#f87171' : cpuPct > 50 ? '#facc15' : '#4ade80'
+  const memColor = memPct > 80 ? '#f87171' : memPct > 50 ? '#facc15' : '#4ade80'
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2 style={{ margin: '0 0 24px' }}>System Monitoring</h2>
-
-      {/* Overview Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <MetricCard
-          icon="💻"
-          label="CPU"
-          value={formatPercent(current?.cpu?.percent)}
-          color={cpuColor}
-          detail={`${current?.cpu?.cores || 0} cores`}
-        />
-        <MetricCard
-          icon="🧠"
-          label="Memory"
-          value={formatPercent(current?.memory?.percent)}
-          color={memColor}
-          detail={`${formatBytes(current?.memory?.used)} / ${formatBytes(current?.memory?.total)}`}
-        />
-        <MetricCard
-          icon="💾"
-          label="Disk"
-          value={formatPercent(current?.disk?.percent)}
-          color="#3b82f6"
-          detail={`${formatBytes(current?.disk?.used)} / ${formatBytes(current?.disk?.total)}`}
-        />
-        <MetricCard
-          icon="🌐"
-          label="Network"
-          value={formatBytes(current?.network?.bytesRecv || 0) + ' ↓ / ' + formatBytes(current?.network?.bytesSent || 0) + ' ↑'}
-          color="#8b5cf6"
-          detail="Since boot"
-        />
+    <div className="p-8">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">System Monitoring</h1>
+        <p className="text-gray-500 mt-1">Live host telemetry and per-container resource consumption</p>
       </div>
 
-      {/* Container Stats */}
-      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 16 }}>
-        <h3 style={{ margin: '0 0 16px' }}>Container Resource Usage</h3>
-        {current?.containers?.length === 0 ? (
-          <p style={{ color: '#64748b', textAlign: 'center', padding: 32 }}>No containers running</p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #334155' }}>
-                  <th style={thStyle}>Container</th>
-                  <th style={thStyle}>CPU %</th>
-                  <th style={thStyle}>Memory</th>
-                  <th style={thStyle}>Network</th>
-                  <th style={thStyle}>Block I/O</th>
-                  <th style={thStyle}>PIDs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {current?.containers?.map(c => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid #1e293b', cursor: 'pointer' }} onClick={() => setSelectedContainer(c)}>
-                    <td style={tdStyle}>{c.name}</td>
-                    <td style={tdStyle}>{c.cpuPercent?.toFixed(1) || 'N/A'}</td>
-                    <td style={tdStyle}>
-                      {c.memoryUsage ? formatBytes(c.memoryUsage) : 'N/A'}
-                      {c.memoryLimit ? ` / ${formatBytes(c.memoryLimit)}` : ''}
-                    </td>
-                    <td style={tdStyle}>
-                      ↓{formatBytes(c.netIO?.rxBytes)} ↑{formatBytes(c.netIO?.txBytes)}
-                    </td>
-                    <td style={tdStyle}>
-                      R:{formatBytes(c.blockIO?.readBytes)} W:{formatBytes(c.blockIO?.writeBytes)}
-                    </td>
-                    <td style={tdStyle}>{c.pids || 'N/A'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {loading && !current ? (
+        <div className="text-center py-12 text-gray-500">Connecting to telemetry stream...</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p className="text-xs text-gray-400">CPU</p>
+              <p className="text-2xl font-bold tabular-nums mt-1" style={{ color: cpuColor }}>
+                {formatPercent(current?.cpu?.percent)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">{current?.cpu?.cores || 0} cores</p>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p className="text-xs text-gray-400">Memory</p>
+              <p className="text-2xl font-bold tabular-nums mt-1" style={{ color: memColor }}>
+                {formatPercent(current?.memory?.percent)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {formatBytes(current?.memory?.used)} / {formatBytes(current?.memory?.total)}
+              </p>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p className="text-xs text-gray-400">Disk</p>
+              <p className="text-2xl font-bold tabular-nums mt-1 text-blue-400">
+                {formatPercent(current?.disk?.percent)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {formatBytes(current?.disk?.used)} / {formatBytes(current?.disk?.total)}
+              </p>
+            </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <p className="text-xs text-gray-400">Network</p>
+              <p className="text-lg font-bold tabular-nums mt-1 text-purple-400">
+                {formatBytes(current?.network?.bytesRecv || 0)} ↓ / {formatBytes(current?.network?.bytesSent || 0)} ↑
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Cumulative I/O</p>
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* History Charts (simplified) */}
-      {history.length > 0 && (
-        <div style={{ marginTop: 24, background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 16 }}>
-          <h3 style={{ margin: '0 0 16px' }}>History (last {history.length} samples)</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-            <Sparkline data={history.map(h => h.cpu?.percent || 0)} color={cpuColor} label="CPU %" />
-            <Sparkline data={history.map(h => h.memory?.percent || 0)} color={memColor} label="Memory %" />
-            <Sparkline data={history.map(h => (h.network?.bytesRecv || 0) / 1024)} color="#3b82f6" label="Net Recv KB/s" />
-            <Sparkline data={history.map(h => (h.network?.bytesSent || 0) / 1024)} color="#8b5cf6" label="Net Sent KB/s" />
+          {/* Container Stats */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+            <h2 className="text-lg font-semibold mb-4">Container Resource Usage</h2>
+            {!current?.containers?.length ? (
+              <p className="text-gray-500 text-center py-8 text-sm">No containers running</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase">
+                      <th className="text-left py-3 px-3">Container</th>
+                      <th className="text-left py-3 px-3">CPU %</th>
+                      <th className="text-left py-3 px-3">Memory</th>
+                      <th className="text-left py-3 px-3">Network</th>
+                      <th className="text-left py-3 px-3">Block I/O</th>
+                      <th className="text-left py-3 px-3">PIDs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {current.containers.map((c) => (
+                      <tr
+                        key={c.id}
+                        onClick={() => openContainerLogs(c)}
+                        className="border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer text-sm"
+                      >
+                        <td className="py-3 px-3 font-medium text-gray-200">{c.name}</td>
+                        <td className="py-3 px-3 tabular-nums">{c.cpuPercent?.toFixed(1) || 'N/A'}%</td>
+                        <td className="py-3 px-3 tabular-nums text-gray-400">
+                          {c.memoryUsage ? formatBytes(c.memoryUsage) : 'N/A'}
+                          {c.memoryLimit ? ` / ${formatBytes(c.memoryLimit)}` : ''}
+                        </td>
+                        <td className="py-3 px-3 tabular-nums text-gray-400">
+                          ↓{formatBytes(c.netIO?.rxBytes)} ↑{formatBytes(c.netIO?.txBytes)}
+                        </td>
+                        <td className="py-3 px-3 tabular-nums text-gray-400">
+                          R:{formatBytes(c.blockIO?.readBytes)} W:{formatBytes(c.blockIO?.writeBytes)}
+                        </td>
+                        <td className="py-3 px-3 tabular-nums">{c.pids || 'N/A'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </div>
+
+          {history.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+              <h2 className="text-lg font-semibold mb-4">History (last {history.length} samples)</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Sparkline data={history.map((h) => h.cpu?.percent || 0)} color={cpuColor} label="CPU %" />
+                <Sparkline data={history.map((h) => h.memory?.percent || 0)} color={memColor} label="Memory %" />
+                <Sparkline data={history.map((h) => (h.network?.bytesRecv || 0) / 1024)} color="#60a5fa" label="Net Recv KB" />
+                <Sparkline data={history.map((h) => (h.network?.bytesSent || 0) / 1024)} color="#a78bfa" label="Net Sent KB" />
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Container Logs Modal */}
       {selectedContainer && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={() => setSelectedContainer(null)}>
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: 24, width: '80%', maxWidth: 800, maxHeight: '70vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-              <h3 style={{ margin: 0 }}>{selectedContainer.name} - Logs</h3>
-              <button onClick={() => setSelectedContainer(null)} style={{ background: '#334155', border: 'none', borderRadius: 6, color: 'white', padding: '8px 16px', cursor: 'pointer' }}>Close</button>
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => setSelectedContainer(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gray-900 border border-gray-800 rounded-2xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">{selectedContainer.name} — Logs</h3>
+              <button
+                onClick={() => setSelectedContainer(null)}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-300"
+              >
+                Close
+              </button>
             </div>
-            <pre style={{ color: '#94a3b8', fontSize: 12, whiteSpace: 'pre-wrap', maxHeight: '60vh', overflow: 'auto' }}>
-              Loading logs...
+            <pre className="flex-1 overflow-auto bg-gray-950 border border-gray-800 rounded-xl p-4 text-xs font-mono text-gray-300 whitespace-pre-wrap">
+              {logsLoading ? 'Loading logs...' : containerLogs}
             </pre>
           </div>
         </div>
@@ -151,45 +224,3 @@ export default function Monitoring() {
     </div>
   )
 }
-
-function MetricCard({ icon, label, value, color, detail }) {
-  return (
-    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <span style={{ fontSize: 28 }}>{icon}</span>
-        <div>
-          <div style={{ color: '#94a3b8', fontSize: 13 }}>{label}</div>
-          <div style={{ color: color, fontSize: 24, fontWeight: 600 }}>{value}</div>
-        </div>
-      </div>
-      <div style={{ color: '#64748b', fontSize: 12 }}>{detail}</div>
-    </div>
-  )
-}
-
-function Sparkline({ data, color, label }) {
-  if (!data.length) return null
-  const max = Math.max(...data) || 1
-  const min = Math.min(...data)
-  const height = 60
-  const width = data.length * 3
-  const points = data.map((v, i) => `${i * 3},${height - ((v - min) / (max - min) * height)}`).join(' ')
-  
-  return (
-    <div>
-      <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 8 }}>{label}</div>
-      <svg width="100%" height={height} style={{ background: '#0f172a', borderRadius: 8 }}>
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          points={points}
-        />
-      </svg>
-      <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>Latest: {data[data.length-1]?.toFixed(1) || 0}</div>
-    </div>
-  )
-}
-
-const thStyle = { textAlign: 'left', padding: '12px', color: '#94a3b8', fontSize: 12, fontWeight: 600 }
-const tdStyle = { padding: '12px', color: '#e2e8f0', fontSize: 13 }

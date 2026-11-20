@@ -86,6 +86,10 @@ export async function apiPost(path, body) {
   return apiFetch(path, { method: 'POST', body: JSON.stringify(body) })
 }
 
+export async function apiPut(path, body) {
+  return apiFetch(path, { method: 'PUT', body: JSON.stringify(body) })
+}
+
 export async function apiDelete(path) {
   return apiFetch(path, { method: 'DELETE' })
 }

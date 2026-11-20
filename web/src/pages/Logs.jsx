@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { apiFetch, apiPost } from '../hooks/useApi'
 
 export default function Logs() {
@@ -11,189 +11,193 @@ export default function Logs() {
   const [follow, setFollow] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
-  useEffect(() => {
-    loadContainers()
-  }, [])
+  const loadContainers = useCallback(async () => {
+    try {
+      const data = await apiFetch('/logs/containers')
+      const list = Array.isArray(data) ? data : []
+      setContainers(list)
+      if (list.length > 0 && !selectedContainer) {
+        setSelectedContainer(list[0])
+      }
+    } catch {
+      setContainers([])
+    }
+  }, [selectedContainer])
 
   useEffect(() => {
-    if (selectedContainer && !follow) {
-      loadLogs()
+    loadContainers()
+  }, [loadContainers])
+
+  const loadLogs = useCallback(async (silent = false) => {
+    if (!selectedContainer) return
+    if (!silent) setLoading(true)
+    try {
+      const data = await apiFetch(
+        `/logs?container=${encodeURIComponent(selectedContainer.id)}&tail=${tail}&filter=${encodeURIComponent(filter)}`
+      )
+      setLogs(Array.isArray(data) ? data : [])
+    } catch {
+      // keep existing
+    } finally {
+      if (!silent) setLoading(false)
     }
   }, [selectedContainer, tail, filter])
 
-  async function loadContainers() {
-    try {
-      const data = await apiFetch('/api/v1/logs/containers')
-      setContainers(data || [])
-    } catch (e) {
-      console.error(e)
+  useEffect(() => {
+    if (selectedContainer) {
+      loadLogs(false)
     }
-  }
+  }, [selectedContainer, tail, filter, loadLogs])
 
-  async function loadLogs() {
-    if (!selectedContainer) return
-    setLoading(true)
-    try {
-      const data = await apiFetch(`/api/v1/logs?container=${selectedContainer.id}&tail=${tail}&filter=${encodeURIComponent(filter)}`)
-      setLogs(data || [])
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
+  useEffect(() => {
+    if (!selectedContainer || !follow) return
+    const timer = setInterval(() => loadLogs(true), 2000)
+    return () => clearInterval(timer)
+  }, [selectedContainer, follow, loadLogs])
 
   async function searchLogs() {
     if (!selectedContainer || !searchQuery) return
     setLoading(true)
     try {
-      const data = await apiPost('/api/v1/logs/search', {
+      const data = await apiPost('/logs/search', {
         container: selectedContainer.id,
         query: searchQuery,
-        limit: 500
+        limit: 500,
       })
-      setLogs(data || [])
-    } catch (e) {
-      console.error(e)
+      setLogs(Array.isArray(data) ? data : [])
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
-  }
-
-  function formatTime(ts) {
-    if (!ts) return ''
-    return new Date(ts).toLocaleTimeString()
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h2 style={{ margin: 0 }}>Container Logs</h2>
-        <button onClick={loadContainers} disabled={loading}
-          style={{ padding: '8px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer' }}>
-          Refresh Containers
+    <div className="p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Container Logs</h1>
+          <p className="text-gray-500 mt-1">Inspect stdout/stderr streams and search deployment output</p>
+        </div>
+        <button
+          onClick={loadContainers}
+          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-200"
+        >
+          🔄 Refresh Containers
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 24 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Container List */}
-        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, padding: 16 }}>
-          <h3 style={{ margin: '0 0 16px' }}>Containers</h3>
-          {loading && <div style={{ textAlign: 'center', color: '#64748b', padding: 20 }}>Loading...</div>}
-          {!loading && containers.length === 0 && (
-            <div style={{ textAlign: 'center', color: '#64748b', padding: 20 }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
-              No containers found
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-gray-300 mb-3">Containers</h2>
+          {containers.length === 0 ? (
+            <div className="text-center text-gray-500 py-8 text-sm">No containers found</div>
+          ) : (
+            <div className="space-y-2 max-h-[65vh] overflow-y-auto">
+              {containers.map((c) => {
+                const active = selectedContainer?.id === c.id
+                const isUp = c.status?.includes('Up')
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedContainer(c)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                      active
+                        ? 'bg-kathal-600/20 border-kathal-500/40 text-white'
+                        : 'bg-gray-950/60 border-gray-800 text-gray-300 hover:bg-gray-800/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-gray-500'}`} />
+                      <span className="text-sm font-medium truncate">{c.name}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1 truncate">{c.image}</p>
+                  </button>
+                )
+              })}
             </div>
           )}
-          <div style={{ maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
-            {containers.map(c => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedContainer(c)}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '12px',
-                  marginBottom: 8,
-                  background: selectedContainer?.id === c.id ? '#3b82f6' : '#0f172a',
-                  border: '1px solid #334155',
-                  borderRadius: 8,
-                  color: 'white',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>
-                    {c.status?.includes('Up') ? '🟢' : c.status?.includes('Exited') ? '🔴' : '⚪'}
-                  </span>
-                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {c.name}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                  {c.image} · {c.id}
-                </div>
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Logs View */}
-        <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 12, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 180px)', minHeight: 400 }}>
+        <div className="lg:col-span-3 bg-gray-900 border border-gray-800 rounded-xl flex flex-col h-[70vh] min-h-[420px]">
           {!selectedContainer ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
-                <p>Select a container to view logs</p>
-              </div>
+            <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+              Select a container to view logs
             </div>
           ) : (
             <>
-              {/* Header */}
-              <div style={{ padding: 16, borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 20 }}>{selectedContainer.status?.includes('Up') ? '🟢' : '🔴'}</span>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: 16 }}>{selectedContainer.name}</h3>
-                    <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>{selectedContainer.image} · {selectedContainer.id}</p>
-                  </div>
+              <div className="p-4 border-b border-gray-800 flex flex-wrap items-center gap-3">
+                <div>
+                  <h3 className="font-semibold text-gray-100">{selectedContainer.name}</h3>
+                  <p className="text-xs text-gray-500">{selectedContainer.image}</p>
                 </div>
 
-                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#94a3b8' }}>
-                    <input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} />
-                    Follow
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer px-2 py-1 bg-gray-800 rounded-lg">
+                    <input
+                      type="checkbox"
+                      checked={follow}
+                      onChange={(e) => setFollow(e.target.checked)}
+                      className="accent-kathal-500"
+                    />
+                    Follow Live
                   </label>
-                  <select value={tail} onChange={e => setTail(parseInt(e.target.value))}
-                    style={{ padding: '6px 10px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13 }}>
+                  <select
+                    value={tail}
+                    onChange={(e) => setTail(parseInt(e.target.value, 10))}
+                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200"
+                  >
                     <option value={50}>50 lines</option>
                     <option value={100}>100 lines</option>
                     <option value={500}>500 lines</option>
-                    <option value={1000}>1000 lines</option>
                   </select>
                   <input
                     type="text"
                     placeholder="Filter..."
                     value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                    style={{ padding: '6px 10px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13, width: 160 }}
+                    onChange={(e) => setFilter(e.target.value)}
+                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 w-36"
                   />
                   <input
                     type="text"
                     placeholder="Search..."
                     value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && searchLogs()}
-                    style={{ padding: '6px 10px', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: 'white', fontSize: 13, width: 180 }}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && searchLogs()}
+                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 w-36"
                   />
-                  <button onClick={searchLogs} disabled={!searchQuery || loading}
-                    style={{ padding: '6px 12px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 13 }}>
+                  <button
+                    onClick={searchLogs}
+                    disabled={!searchQuery || loading}
+                    className="px-3 py-1.5 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-xs font-medium disabled:opacity-50"
+                  >
                     Search
                   </button>
                 </div>
               </div>
 
-              {/* Logs */}
-              <div style={{ flex: 1, overflow: 'auto', padding: 16, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}>
+              <div className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed bg-gray-950/60">
                 {loading ? (
-                  <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Loading logs...</div>
+                  <div className="text-gray-500 text-center py-8">Loading logs...</div>
                 ) : logs.length === 0 ? (
-                  <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>No logs found</div>
+                  <div className="text-gray-500 text-center py-8">No logs found</div>
                 ) : (
-                  <div>
-                    {logs.map((line, i) => (
-                      <div key={i} style={{
-                        padding: '2px 0',
-                        color: line.stream === 'stderr' ? '#f87171' : '#cbd5e1',
-                        borderBottom: '1px solid #1e293b',
-                        wordBreak: 'break-word'
-                      }}>
-                        <span style={{ color: '#64748b', marginRight: 8 }}>{formatTime(line.timestamp)}</span>
-                        <span style={{ color: '#94a3b8', marginRight: 8, textTransform: 'uppercase', fontSize: 10 }}>{line.stream}</span>
-                        <span>{line.content}</span>
-                      </div>
-                    ))}
-                  </div>
+                  logs.map((line, i) => (
+                    <div
+                      key={i}
+                      className={`py-1 border-b border-gray-900 break-words ${
+                        line.stream === 'stderr' ? 'text-red-400' : 'text-gray-300'
+                      }`}
+                    >
+                      <span className="text-gray-600 mr-2 tabular-nums">
+                        {line.timestamp ? new Date(line.timestamp).toLocaleTimeString() : ''}
+                      </span>
+                      <span className="text-gray-500 mr-2 uppercase text-[10px]">{line.stream}</span>
+                      <span>{line.content}</span>
+                    </div>
+                  ))
                 )}
               </div>
             </>

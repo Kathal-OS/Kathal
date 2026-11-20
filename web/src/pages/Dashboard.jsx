@@ -1,14 +1,33 @@
-import { useApi } from '../hooks/useApi'
+import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import {
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  ArrowUpDown,
+  Globe,
+  Database,
+  Layers,
+  Activity,
+  Rocket,
+  ArrowRight,
+  CheckCircle2,
+  AlertTriangle,
+} from 'lucide-react'
+import { useApi, apiFetch, apiPost } from '../hooks/useApi'
+import ContainerStatusWidget from '../components/ContainerStatusWidget'
+import HostMonitoringWidget from '../components/HostMonitoringWidget'
+import QuickActionsWidget from '../components/QuickActionsWidget'
 
-function MetricCard({ icon, label, value, sub, color = 'text-kathal-400' }) {
+function MetricCard({ icon: Icon, label, value, sub }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+    <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-2xl">{icon}</span>
-        <span className={`text-2xl font-bold ${color}`}>{value}</span>
+        <span className="text-xs font-medium text-slate-400">{label}</span>
+        <Icon className="w-4 h-4 text-slate-500" strokeWidth={1.85} />
       </div>
-      <p className="text-sm text-gray-400">{label}</p>
-      {sub && <p className="text-xs text-gray-600 mt-1">{sub}</p>}
+      <p className="text-2xl font-bold text-slate-100 tabular-nums">{value}</p>
+      {sub && <p className="text-xs text-slate-500 mt-1 tabular-nums">{sub}</p>}
     </div>
   )
 }
@@ -31,159 +50,328 @@ function formatUptime(seconds) {
   return `${m}m`
 }
 
-function DockerBadge({ available }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-      available
-        ? 'bg-green-600/20 text-green-400 border border-green-600/30'
-        : 'bg-yellow-600/20 text-yellow-400 border border-yellow-600/30'
-    }`}>
-      <span className={`w-2 h-2 rounded-full ${available ? 'bg-green-400' : 'bg-yellow-400'}`}></span>
-      {available ? 'Docker Connected' : 'System-Only Mode'}
-    </span>
-  )
-}
+const QUICK_APPS = [
+  {
+    id: 'nginx',
+    name: 'Website Host (Nginx)',
+    desc: 'Serve websites or landing pages',
+    icon: Globe,
+    image: 'nginx:alpine',
+    port: 80,
+  },
+  {
+    id: 'postgres',
+    name: 'PostgreSQL Database',
+    desc: 'Structured database for your apps',
+    icon: Database,
+    image: 'postgres:16-alpine',
+    port: 5432,
+  },
+  {
+    id: 'redis',
+    name: 'Redis Cache',
+    desc: 'Fast in-memory key-value store',
+    icon: Layers,
+    image: 'redis:7-alpine',
+    port: 6379,
+  },
+  {
+    id: 'uptime-kuma',
+    name: 'Uptime Monitor',
+    desc: 'Watch site & API availability',
+    icon: Activity,
+    image: 'louislam/uptime-kuma:latest',
+    port: 3001,
+  },
+]
 
-export default function Dashboard() {
-  const { data: metrics, loading } = useApi('/metrics')
+export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch }) {
+  const { data: initialMetrics, loading } = useApi('/metrics')
   const { data: status } = useApi('/status')
+  const [metrics, setMetrics] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [deployingApp, setDeployingApp] = useState(null)
+  const [deployNotice, setDeployNotice] = useState(null)
 
-  if (loading) {
+  useEffect(() => {
+    if (initialMetrics) setMetrics(initialMetrics)
+  }, [initialMetrics])
+
+  const refreshDashboard = useCallback(async () => {
+    setRefreshKey((k) => k + 1)
+    try {
+      const latest = await apiFetch('/metrics')
+      setMetrics(latest)
+    } catch {
+      // Keep previous metrics if refresh fails
+    }
+  }, [])
+
+  useEffect(() => {
+    if (externalRefreshKey > 0) {
+      refreshDashboard()
+    }
+  }, [externalRefreshKey, refreshDashboard])
+
+  const handleQuickDeploy = async (app) => {
+    setDeployingApp(app.id)
+    setDeployNotice(null)
+    try {
+      const res = await apiPost('/deploy', {
+        name: app.id,
+        image: app.image,
+        containerPort: app.port,
+        autoDomain: true,
+        source: 'quick-deploy',
+      })
+      setDeployNotice({
+        type: 'success',
+        title: `${app.name} is now running`,
+        detail: `Port ${res.app?.port}${
+          res.proxyRoute ? ` · Web domain ${res.proxyRoute.domain}` : ''
+        }`,
+      })
+      await refreshDashboard()
+    } catch (err) {
+      setDeployNotice({
+        type: 'error',
+        title: `Could not launch ${app.name}`,
+        detail: err.message || 'Deployment error',
+      })
+    } finally {
+      setDeployingApp(null)
+    }
+  }
+
+  if (loading && !metrics) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-gray-500">Loading dashboard...</div>
+      <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-6">
+        <div className="h-24 rounded-xl bg-slate-900/60 border border-slate-800/80 animate-pulse" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-28 rounded-xl bg-slate-900/60 border border-slate-800/80 animate-pulse" />
+          ))}
+        </div>
       </div>
     )
   }
 
   const sys = metrics?.system
   const docker = metrics?.docker
+  const runningCount = docker?.containersRunning || 0
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-gray-500 mt-1">
-            {status?.platform && (
-              <>Running on {status.platform} ({status.arch})</>
-            )}
+    <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Welcome / Status Banner */}
+      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1.5 font-medium text-green-400">
+              {status?.dockerAvailable ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Engine Connected</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-amber-400">System Mode</span>
+                </>
+              )}
+            </span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span>{status?.platform || 'linux'} ({status?.arch || 'x64'})</span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span className="tabular-nums">Uptime {formatUptime(sys?.uptime)}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100">
+            Server Control Center
+          </h1>
+          <p className="text-sm text-slate-400">
+            {runningCount} {runningCount === 1 ? 'app is' : 'apps are'} currently running. Launch a new app in one click without writing code.
           </p>
         </div>
-        <DockerBadge available={status?.dockerAvailable || false} />
-      </div>
 
-      {/* System metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <MetricCard
-          icon="⚡"
-          label="CPU Usage"
-          value={`${sys?.cpu?.toFixed(1) || 0}%`}
-          sub={`${sys?.cpuCores || 0} cores`}
-        />
-        <MetricCard
-          icon="🧠"
-          label="Memory"
-          value={`${sys?.memory?.percent?.toFixed(1) || 0}%`}
-          sub={`${formatBytes(sys?.memory?.used)} / ${formatBytes(sys?.memory?.total)}`}
-        />
-        <MetricCard
-          icon="💾"
-          label="Disk"
-          value={`${sys?.disk?.percent?.toFixed(1) || 0}%`}
-          sub={`${formatBytes(sys?.disk?.used)} / ${formatBytes(sys?.disk?.total)}`}
-        />
-        <MetricCard
-          icon="🌐"
-          label="Network"
-          value={`${formatBytes(sys?.network?.bytesSent)}`}
-          sub={`↑ sent / ↓ ${formatBytes(sys?.network?.bytesRecv)} recv`}
-        />
-      </div>
-
-      {/* System info */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4">System</h2>
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Platform</span>
-              <span>{status?.platform} / {status?.arch}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Go Version</span>
-              <span>{sys?.goVersion || status?.goVersion}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Uptime</span>
-              <span>{formatUptime(sys?.uptime)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">KATHAL Version</span>
-              <span>v{status?.version}</span>
-            </div>
-            {sys?.load?.load1 > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">Load Average</span>
-                <span>{sys.load.load1.toFixed(2)} / {sys.load.load5.toFixed(2)} / {sys.load.load15.toFixed(2)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4">Docker</h2>
-          {status?.dockerAvailable ? (
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Version</span>
-                <span>{status?.dockerVersion || docker?.containersRunning !== undefined ? `v${status?.dockerVersion}` : 'N/A'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Running Containers</span>
-                <span className="text-green-400">{docker?.containersRunning || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Stopped Containers</span>
-                <span className="text-yellow-400">{docker?.containersStopped || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Images</span>
-                <span>{docker?.imagesCount || 0}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <span className="text-4xl mb-3 block">🐳</span>
-              <p className="text-gray-500 mb-2">Docker not available</p>
-              <p className="text-xs text-gray-600 max-w-xs mx-auto">
-                Install Docker Desktop to manage containers. KATHAL runs in system-only mode without Docker.
-              </p>
-            </div>
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <Link
+            to="/templates"
+            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium whitespace-nowrap transition-colors"
+          >
+            Browse App Store
+          </Link>
+          {onOpenQuickLaunch && (
+            <button
+              type="button"
+              onClick={onOpenQuickLaunch}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-kathal-600 hover:bg-kathal-500 text-white text-sm font-medium whitespace-nowrap transition-colors"
+            >
+              <Rocket className="w-4 h-4" />
+              <span>Launch New App</span>
+            </button>
           )}
         </div>
       </div>
 
-      {/* Quick actions */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <h2 className="text-lg font-semibold mb-4">Quick Deploy</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { name: 'Nginx', icon: '🌐', image: 'nginx:alpine' },
-            { name: 'PostgreSQL', icon: '🐘', image: 'postgres:16-alpine' },
-            { name: 'Redis', icon: '🔴', image: 'redis:alpine' },
-            { name: 'Portainer', icon: '🐳', image: 'portainer/portainer-ce:latest' },
-          ].map(app => (
-            <button
-              key={app.name}
-              className="p-4 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-kathal-500/50 rounded-lg transition-all text-left group"
-            >
-              <span className="text-2xl mb-2 block">{app.icon}</span>
-              <p className="font-medium text-sm group-hover:text-kathal-400 transition-colors">{app.name}</p>
-              <p className="text-xs text-gray-600 mt-1 truncate">{app.image}</p>
-            </button>
-          ))}
+      {/* System Resources */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCard
+          icon={Cpu}
+          label="Processor (CPU)"
+          value={`${sys?.cpu?.toFixed(1) || 0}%`}
+          sub={`${sys?.cpuCores || 0} cores available`}
+        />
+        <MetricCard
+          icon={MemoryStick}
+          label="Memory (RAM)"
+          value={`${sys?.memory?.percent?.toFixed(1) || 0}%`}
+          sub={`${formatBytes(sys?.memory?.used)} of ${formatBytes(sys?.memory?.total)}`}
+        />
+        <MetricCard
+          icon={HardDrive}
+          label="Storage (Disk)"
+          value={`${sys?.disk?.percent?.toFixed(1) || 0}%`}
+          sub={`${formatBytes(sys?.disk?.used)} of ${formatBytes(sys?.disk?.total)}`}
+        />
+        <MetricCard
+          icon={ArrowUpDown}
+          label="Network Traffic"
+          value={formatBytes(sys?.network?.bytesSent)}
+          sub={`Sent · ${formatBytes(sys?.network?.bytesRecv)} received`}
+        />
+      </div>
+
+      {/* Live Host CPU & Memory Monitoring Widget */}
+      <HostMonitoringWidget />
+
+      {/* Docker container status widget */}
+      <ContainerStatusWidget dockerAvailable={status?.dockerAvailable} refreshKey={refreshKey} />
+
+      {/* Quick Actions */}
+      <QuickActionsWidget onPruned={refreshDashboard} />
+
+      {/* One-Click Popular Apps */}
+      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">One-Click Popular Apps</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Start ready-made websites, databases, and monitors instantly — ports and web addresses are handled automatically.
+            </p>
+          </div>
+          <Link
+            to="/templates"
+            className="inline-flex items-center gap-1 text-xs text-kathal-400 hover:text-kathal-300 font-medium whitespace-nowrap"
+          >
+            <span>See all 14+ templates</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        {deployNotice && (
+          <div
+            className={`mb-4 p-3 rounded-lg border text-xs flex flex-wrap items-center justify-between gap-2 ${
+              deployNotice.type === 'error'
+                ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                : 'bg-green-500/10 border-green-500/30 text-green-400'
+            }`}
+          >
+            <div>
+              <p className="font-semibold">{deployNotice.title}</p>
+              <p className="text-slate-300 mt-0.5">{deployNotice.detail}</p>
+            </div>
+            {deployNotice.type === 'success' && (
+              <div className="flex items-center gap-2">
+                <Link to="/containers" className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
+                  Running Apps →
+                </Link>
+                <Link to="/proxy" className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
+                  Domains →
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {QUICK_APPS.map((app) => {
+            const Icon = app.icon
+            const isDeploying = deployingApp === app.id
+            return (
+              <button
+                key={app.id}
+                type="button"
+                onClick={() => handleQuickDeploy(app)}
+                disabled={deployingApp !== null}
+                className="p-4 bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800 hover:border-kathal-500/50 rounded-xl transition-colors text-left group disabled:opacity-60"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-slate-300 group-hover:text-kathal-400 transition-colors">
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <span className="text-[11px] font-medium text-kathal-400 opacity-80 group-hover:opacity-100">
+                    {isDeploying ? 'Starting...' : 'Launch →'}
+                  </span>
+                </div>
+                <p className="font-semibold text-sm text-slate-100 group-hover:text-kathal-400 transition-colors">
+                  {app.name}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">{app.desc}</p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* System Summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+          <h2 className="text-base font-semibold text-slate-100 mb-4">Server Details</h2>
+          <dl className="space-y-3 text-sm">
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Operating System</dt>
+              <dd className="text-slate-200">{status?.platform} / {status?.arch}</dd>
+            </div>
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Runtime Engine</dt>
+              <dd className="text-slate-200 font-mono text-xs">{sys?.goVersion || status?.goVersion}</dd>
+            </div>
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Control Panel Version</dt>
+              <dd className="text-slate-200 font-mono text-xs">v{status?.version}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-slate-400">System Load (1m / 5m / 15m)</dt>
+              <dd className="text-slate-200 font-mono text-xs tabular-nums">
+                {sys?.load ? `${sys.load.load1.toFixed(2)} / ${sys.load.load5.toFixed(2)} / ${sys.load.load15.toFixed(2)}` : '—'}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+          <h2 className="text-base font-semibold text-slate-100 mb-4">Container Summary</h2>
+          <dl className="space-y-3 text-sm">
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Engine Version</dt>
+              <dd className="text-slate-200 font-mono text-xs">
+                {status?.dockerVersion ? `v${status.dockerVersion}` : 'N/A'}
+              </dd>
+            </div>
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Running Apps</dt>
+              <dd className="text-green-400 font-semibold tabular-nums">{docker?.containersRunning || 0}</dd>
+            </div>
+            <div className="flex justify-between border-b border-slate-800/60 pb-2">
+              <dt className="text-slate-400">Paused / Stopped</dt>
+              <dd className="text-slate-300 tabular-nums">
+                {(docker?.containersPaused || 0)} paused · {(docker?.containersStopped || 0)} stopped
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-slate-400">Saved Images</dt>
+              <dd className="text-slate-200 tabular-nums">{docker?.imagesCount || 0}</dd>
+            </div>
+          </dl>
         </div>
       </div>
     </div>

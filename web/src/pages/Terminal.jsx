@@ -1,68 +1,55 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { apiFetch, apiPost } from '../hooks/useApi'
 
 export default function Terminal() {
-  const termRef = useRef(null)
+  const termContainerRef = useRef(null)
+  const termInstanceRef = useRef(null)
   const wsRef = useRef(null)
+  const sessionIdRef = useRef(null)
+  const resizeHandlerRef = useRef(null)
+
   const [connected, setConnected] = useState(false)
   const [sessionId, setSessionId] = useState(null)
-  const [dims, setDims] = useState({ cols: 120, rows: 30 })
+  const [error, setError] = useState(null)
 
-  useEffect(() => {
-    startSession()
-    return () => closeSession()
+  const cleanup = useCallback(() => {
+    if (resizeHandlerRef.current) {
+      window.removeEventListener('resize', resizeHandlerRef.current)
+      resizeHandlerRef.current = null
+    }
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    if (sessionIdRef.current) {
+      const idToClose = sessionIdRef.current
+      sessionIdRef.current = null
+      apiFetch(`/terminal/sessions/${idToClose}`, { method: 'DELETE' }).catch(() => {})
+    }
+    if (termInstanceRef.current) {
+      termInstanceRef.current.dispose()
+      termInstanceRef.current = null
+    }
+    setConnected(false)
   }, [])
 
-  async function startSession() {
+  const initTerminal = useCallback(async () => {
     try {
-      const token = localStorage.getItem('kathal_token')
-      const result = await apiPost('/api/v1/terminal/sessions', {
-        cols: dims.cols,
-        rows: dims.rows,
-      })
-      const id = result.id || result.session_id
-      setSessionId(id)
-
-      // Connect WebSocket
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?token=${token}`
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        setConnected(true)
-        initTerminal(id)
-      }
-
-      ws.onmessage = (event) => {
-        if (window.term) {
-          window.term.write(event.data)
-        }
-      }
-
-      ws.onclose = () => setConnected(false)
-      ws.onerror = () => setConnected(false)
-    } catch (e) {
-      console.error('Failed to start terminal:', e)
-    }
-  }
-
-  async function initTerminal(sessionId) {
-    // Dynamic import xterm
-    try {
-      const { Terminal } = await import('@xterm/xterm')
+      const { Terminal: XTerm } = await import('@xterm/xterm')
       const { FitAddon } = await import('@xterm/addon-fit')
       await import('@xterm/xterm/css/xterm.css')
 
-      if (!termRef.current) return
-      if (window.term) { window.term.dispose() }
+      if (!termContainerRef.current) return
+      if (termInstanceRef.current) {
+        termInstanceRef.current.dispose()
+      }
 
-      const term = new Terminal({
+      const term = new XTerm({
         theme: {
-          background: '#0f172a',
-          foreground: '#e2e8f0',
-          cursor: '#3b82f6',
-          selectionBackground: '#334155',
+          background: '#030712',
+          foreground: '#e5e7eb',
+          cursor: '#e0644d',
+          selectionBackground: '#374151',
         },
         fontFamily: '"Cascadia Code", "Fira Code", monospace',
         fontSize: 14,
@@ -71,8 +58,8 @@ export default function Terminal() {
 
       const fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
-      term.open(termRef.current)
-      window.term = term
+      term.open(termContainerRef.current)
+      termInstanceRef.current = term
 
       term.onData((data) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -80,11 +67,10 @@ export default function Terminal() {
         }
       })
 
-      // Fit after short delay
       setTimeout(() => fitAddon.fit(), 100)
 
-      // Handle resize
       const resizeHandler = () => fitAddon.fit()
+      resizeHandlerRef.current = resizeHandler
       window.addEventListener('resize', resizeHandler)
 
       term.onResize(({ cols, rows }) => {
@@ -93,66 +79,84 @@ export default function Terminal() {
         }
       })
     } catch (e) {
-      console.error('Failed to init xterm:', e)
-      // Fallback: show text terminal
-      termRef.current.innerHTML = '<div style="padding:16px;color:#94a3b8;font-family:monospace">Web terminal requires @xterm/xterm package. Install: npm install @xterm/xterm @xterm/addon-fit</div>'
+      setError('Terminal renderer failed to initialize: ' + e.message)
     }
-  }
+  }, [])
 
-  async function closeSession() {
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+  const startSession = useCallback(async () => {
+    cleanup()
+    setError(null)
+    try {
+      const token = localStorage.getItem('kathal_token')
+      const result = await apiPost('/terminal/sessions', { cols: 120, rows: 30 })
+      const id = result.id || result.session_id
+      sessionIdRef.current = id
+      setSessionId(id)
+
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?token=${token}`
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = async () => {
+        await initTerminal()
+        setConnected(true)
+      }
+
+      ws.onmessage = (event) => {
+        if (termInstanceRef.current) {
+          termInstanceRef.current.write(event.data)
+        }
+      }
+
+      ws.onclose = () => setConnected(false)
+      ws.onerror = () => {
+        setConnected(false)
+        setError('WebSocket connection closed.')
+      }
+    } catch (e) {
+      setError('Failed to start terminal session: ' + e.message)
     }
-    if (sessionId) {
-      try {
-        await apiFetch(`/api/v1/terminal/sessions/${sessionId}`, { method: 'DELETE' })
-      } catch (e) { /* ignore */ }
-    }
-    if (window.term) {
-      window.term.dispose()
-      window.term = null
-    }
-    setConnected(false)
-  }
+  }, [cleanup, initTerminal])
+
+  useEffect(() => {
+    startSession()
+    return () => cleanup()
+  }, [startSession, cleanup])
 
   return (
-    <div style={{ padding: 24, height: 'calc(100vh - 48px)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Terminal</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{
-            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-            background: connected ? '#22c55e' : '#ef4444'
-          }} />
-          <span style={{ color: '#94a3b8', fontSize: 13 }}>
+    <div className="p-8 h-screen flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div>
+          <h1 className="text-2xl font-bold">Web Terminal</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Interactive node shell · Session: {sessionId || 'initializing'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 text-xs text-gray-300">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
             {connected ? 'Connected' : 'Disconnected'}
           </span>
-          {!connected && (
-            <button onClick={startSession}
-              style={{ padding: '6px 12px', background: '#3b82f6', border: 'none', borderRadius: 6, color: 'white', cursor: 'pointer', fontSize: 12 }}>
-              Reconnect
-            </button>
-          )}
+          <button
+            onClick={startSession}
+            className="px-3 py-1.5 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-xs font-medium"
+          >
+            {connected ? 'New Session' : 'Reconnect'}
+          </button>
         </div>
       </div>
 
-      <div ref={termRef}
-        style={{
-          flex: 1,
-          background: '#0f172a',
-          border: '1px solid #334155',
-          borderRadius: 8,
-          padding: 4,
-          overflow: 'hidden',
-        }}
-      />
+      {error && (
+        <div className="mb-3 p-3 rounded-lg bg-red-600/10 border border-red-600/30 text-red-400 text-xs">
+          {error}
+        </div>
+      )}
 
-      <div style={{ marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
-        <span style={{ color: '#64748b', fontSize: 11 }}>
-          Shell: /bin/bash · Session: {sessionId || 'none'}
-        </span>
-      </div>
+      <div
+        ref={termContainerRef}
+        className="flex-1 bg-gray-950 border border-gray-800 rounded-xl p-2 overflow-hidden"
+      />
     </div>
   )
 }
