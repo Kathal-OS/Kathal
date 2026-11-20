@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react'
 
+function buildApiUrl(path) {
+  if (path.startsWith('/api/v1')) return path
+  return '/api/v1' + (path.startsWith('/') ? path : '/' + path)
+}
+
 // useApi fetches a GET endpoint with JWT auth from localStorage.
 // Returns { data, loading, error } and re-fetches when the path changes.
 export function useApi(path) {
@@ -15,7 +20,7 @@ export function useApi(path) {
     const headers = {}
     if (token) headers['Authorization'] = 'Bearer ' + token
 
-    fetch('/api/v1' + path, { headers })
+    fetch(buildApiUrl(path), { headers })
       .then(res => {
         if (!res.ok) throw new Error('HTTP ' + res.status)
         return res.json()
@@ -35,7 +40,7 @@ export async function apiFetch(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
   if (token) headers['Authorization'] = 'Bearer ' + token
 
-  const res = await fetch('/api/v1' + path, { ...options, headers })
+  const res = await fetch(buildApiUrl(path), { ...options, headers })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
   return data
@@ -46,7 +51,7 @@ export async function apiFetchBlob(path, options = {}) {
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = 'Bearer ' + token
 
-  const res = await fetch('/api/v1' + path, { ...options, headers })
+  const res = await fetch(buildApiUrl(path), { ...options, headers })
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.blob()
 }
@@ -56,7 +61,7 @@ export async function apiFetchText(path, options = {}) {
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = 'Bearer ' + token
 
-  const res = await fetch('/api/v1' + path, { ...options, headers })
+  const res = await fetch(buildApiUrl(path), { ...options, headers })
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.text()
 }
@@ -66,7 +71,7 @@ export async function apiPostFormData(path, formData, options = {}) {
   const headers = { ...options.headers }
   if (token) headers['Authorization'] = 'Bearer ' + token
 
-  const res = await fetch('/api/v1' + path, {
+  const res = await fetch(buildApiUrl(path), {
     ...options,
     method: 'POST',
     headers,

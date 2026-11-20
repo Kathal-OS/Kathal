@@ -1,0 +1,5 @@
+{
+  "name": "KATHAL OS",
+  "description": "Portable Infrastructure Operating System dashboard for containers, images, compose stacks, reverse proxy, databases, monitoring, and web terminal management.",
+  "requestFramePermissions": []
+}

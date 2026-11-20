@@ -52,6 +52,7 @@ export default function Terminal() {
     try {
       const { Terminal } = await import('@xterm/xterm')
       const { FitAddon } = await import('@xterm/addon-fit')
+      await import('@xterm/xterm/css/xterm.css')
 
       if (!termRef.current) return
       if (window.term) { window.term.dispose() }
