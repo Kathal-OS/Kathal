@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   X,
   ArrowUpRight,
+  RefreshCw,
+  Terminal,
 } from 'lucide-react'
 import { apiFetch, apiPost, apiDelete } from '../hooks/useApi'
 
@@ -38,34 +40,26 @@ function readFavorites() {
   }
 }
 
-const CATEGORY_META = {
-  databases: { icon: Database, label: 'Databases' },
-  webservers: { icon: Globe, label: 'Web Servers' },
-  cms: { icon: FileText, label: 'CMS & Knowledge' },
-  devtools: { icon: Wrench, label: 'Dev Tools' },
-  business: { icon: Briefcase, label: 'Business' },
-  ai: { icon: Cpu, label: 'AI & LLM' },
-  monitoring: { icon: Activity, label: 'Monitoring' },
-  media: { icon: Film, label: 'Media & Files' },
-  networking: { icon: Shield, label: 'Networking' },
-  automation: { icon: Workflow, label: 'Automation & IoT' },
+const CATEGORY_ICONS = {
+  databases: Database,
+  webservers: Globe,
+  cms: FileText,
+  devtools: Wrench,
+  business: Briefcase,
+  ai: Cpu,
+  monitoring: Activity,
+  media: Film,
+  networking: Shield,
+  automation: Workflow,
 }
-
-const COMPATIBILITY_OPTIONS = [
-  'All Runtimes',
-  'Native',
-  'Node.js',
-  'Python',
-  'Go Binary',
-  'Java',
-  'PHP',
-  'External Dependencies',
-  'Advanced Installation',
-]
 
 export default function Templates() {
   const [templates, setTemplates] = useState([])
   const [categories, setCategories] = useState({})
+  const [categoryDefs, setCategoryDefs] = useState({})
+  const [compatibilityLabels, setCompatibilityLabels] = useState([])
+  const [registryMeta, setRegistryMeta] = useState({ schemaVersion: '1.0.0', updatedAt: null })
+  const [reloadingRegistry, setReloadingRegistry] = useState(false)
   const [totalCount, setTotalCount] = useState(0)
   const [installations, setInstallations] = useState([])
   const [runtimes, setRuntimes] = useState(null)
@@ -91,15 +85,21 @@ export default function Templates() {
   const loadCatalog = useCallback(async () => {
     setLoading(true)
     try {
-      const [tpls, catResp, instList, rtReport] = await Promise.all([
-        apiFetch('/templates'),
-        apiFetch('/templates/categories'),
+      const [registryResp, instList, rtReport] = await Promise.all([
+        apiFetch('/registry'),
         apiFetch('/installations'),
         apiFetch('/runtimes'),
       ])
-      setTemplates(tpls || [])
-      setCategories(catResp?.counts || catResp || {})
-      setTotalCount(catResp?.total || (tpls || []).length)
+      const apps = registryResp?.applications || []
+      setTemplates(apps)
+      setCategories(registryResp?.categoryCounts || {})
+      setCategoryDefs(registryResp?.categories || {})
+      setCompatibilityLabels(registryResp?.compatibilityLabels || [])
+      setRegistryMeta({
+        schemaVersion: registryResp?.schemaVersion || '1.0.0',
+        updatedAt: registryResp?.updatedAt || null,
+      })
+      setTotalCount(registryResp?.totalApps || apps.length)
       setInstallations(instList || [])
       setRuntimes(rtReport || null)
     } catch (e) {
@@ -108,6 +108,18 @@ export default function Templates() {
       setLoading(false)
     }
   }, [])
+
+  async function handleReloadRegistry() {
+    setReloadingRegistry(true)
+    try {
+      await apiPost('/registry/reload', {})
+      await loadCatalog()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setReloadingRegistry(false)
+    }
+  }
 
   useEffect(() => {
     loadCatalog()
@@ -251,7 +263,7 @@ export default function Templates() {
   }
 
   const hostRuntimes = runtimes?.runtimes || {}
-  const SelectedIcon = selected ? CATEGORY_META[selected.category]?.icon || Store : Store
+  const compatOptions = ['All Runtimes', ...(compatibilityLabels || [])]
 
   return (
     <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-6">
@@ -260,7 +272,7 @@ export default function Templates() {
         <div>
           <h1 className="text-3xl font-bold text-slate-100">App Store &amp; Templates</h1>
           <p className="text-slate-400 text-sm mt-1">
-            {totalCount} curated open-source applications with official links, runtime preflight verification, and automated local installation.
+            {totalCount} open-source applications loaded from the central JSON registry (schema v{registryMeta.schemaVersion}) with installation commands and health checks.
           </p>
         </div>
 
@@ -286,6 +298,16 @@ export default function Templates() {
             <option value="alpha">Sort: Alphabetical (A–Z)</option>
             <option value="recent">Sort: Recently Added</option>
           </select>
+
+          <button
+            type="button"
+            onClick={handleReloadRegistry}
+            disabled={reloadingRegistry}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#111827] hover:bg-slate-800 border border-slate-800 rounded-lg text-xs text-slate-300 whitespace-nowrap"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reloadingRegistry ? 'animate-spin' : ''}`} />
+            <span>Reload Registry</span>
+          </button>
         </div>
       </div>
 
@@ -348,7 +370,7 @@ export default function Templates() {
             onChange={(e) => setFilterCompat(e.target.value)}
             className="bg-[#111827] border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
-            {COMPATIBILITY_OPTIONS.map((opt) => (
+            {compatOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
@@ -380,12 +402,15 @@ export default function Templates() {
         >
           All Categories ({totalCount})
         </button>
-        {Object.entries(CATEGORY_META).map(([key, { icon: Icon, label }]) =>
-          categories[key] ? (
+        {Object.entries(categoryDefs).map(([key, def]) => {
+          const Icon = CATEGORY_ICONS[key] || Store
+          const count = categories[key] || 0
+          return count ? (
             <button
               key={key}
               type="button"
               onClick={() => setFilterCat(key)}
+              title={def.description}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border whitespace-nowrap shrink-0 transition-colors ${
                 filterCat === key
                   ? 'bg-kathal-600 border-kathal-500 text-white'
@@ -393,10 +418,10 @@ export default function Templates() {
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
-              <span>{label} ({categories[key]})</span>
+              <span>{def.label} ({count})</span>
             </button>
           ) : null
-        )}
+        })}
       </div>
 
       {/* App Grid */}
@@ -426,7 +451,7 @@ export default function Templates() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredTemplates.map((t) => {
-            const cat = CATEGORY_META[t.category]
+            const cat = categoryDefs[t.category]
             const inst = installationByTemplate.get(t.id)
             const isFav = favorites.includes(t.id)
 
@@ -642,6 +667,25 @@ export default function Templates() {
                 </div>
               )}
             </div>
+
+            {selected.installCommands && (
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 text-[11px] space-y-1.5">
+                <div className="flex items-center justify-between text-slate-300">
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <Terminal className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Registry Recipe ({selected.installCommands.mode})</span>
+                  </span>
+                  {selected.healthCheck && (
+                    <span className="font-mono text-slate-400">
+                      Health: {selected.healthCheck.type.toUpperCase()} {selected.healthCheck.path}
+                    </span>
+                  )}
+                </div>
+                <pre className="font-mono text-slate-400 overflow-x-auto whitespace-pre-wrap">
+                  {[...(selected.installCommands.install || []), ...(selected.installCommands.start || [])].join('\n')}
+                </pre>
+              </div>
+            )}
 
             {deployError && (
               <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs">

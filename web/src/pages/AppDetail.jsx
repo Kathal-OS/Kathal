@@ -475,11 +475,40 @@ export default function AppDetail() {
                 </div>
               )}
 
+              {inst.state === 'running' && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+                  <div className="bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2">
+                    <p className="text-slate-400">CPU Usage</p>
+                    <p className="font-mono tabular-nums text-slate-100 font-semibold mt-0.5">
+                      {Number(inst.cpuPercent || 0).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2">
+                    <p className="text-slate-400">Memory (RSS)</p>
+                    <p className="font-mono tabular-nums text-slate-100 font-semibold mt-0.5">
+                      {Number(inst.memoryMb || 0).toFixed(1)} MB
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2">
+                    <p className="text-slate-400">Uptime</p>
+                    <p className="font-mono tabular-nums text-slate-100 font-semibold mt-0.5">
+                      {inst.uptimeLabel || 'Running'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/70 border border-slate-800 rounded-lg px-3 py-2">
+                    <p className="text-slate-400">Threads / Restarts</p>
+                    <p className="font-mono tabular-nums text-slate-100 font-semibold mt-0.5">
+                      {inst.threads || 1} / {inst.restartCount || 0}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Logs */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
                   <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Installation &amp; Runtime Logs</span>
+                  <span>Installation &amp; Service Engine Logs</span>
                 </div>
                 <pre className="bg-[#070B12] border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-slate-300 max-h-64 overflow-y-auto whitespace-pre-wrap">
                   {(inst.logs || []).length > 0
@@ -576,6 +605,77 @@ export default function AppDetail() {
               </div>
             )}
           </div>
+
+          {/* Registry Install Commands & Health Check Definition */}
+          {(app.installCommands || app.healthCheck) && (
+            <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-slate-400" />
+                  <h2 className="text-lg font-semibold text-slate-100">Registry Commands &amp; Health Check</h2>
+                </div>
+                {app.installCommands?.mode && (
+                  <span className="text-xs font-mono text-slate-400 uppercase">
+                    Mode: {app.installCommands.mode}
+                  </span>
+                )}
+              </div>
+
+              {app.installCommands && (
+                <div className="space-y-3 text-xs">
+                  {(app.installCommands.prepare || []).length > 0 && (
+                    <div>
+                      <p className="text-slate-400 mb-1">1. Prepare Workspace</p>
+                      <pre className="bg-[#070B12] border border-slate-800 rounded-lg p-3 font-mono text-slate-300 overflow-x-auto">
+                        {app.installCommands.prepare.join('\n')}
+                      </pre>
+                    </div>
+                  )}
+                  {(app.installCommands.install || []).length > 0 && (
+                    <div>
+                      <p className="text-slate-400 mb-1">2. Install Package / Binary</p>
+                      <pre className="bg-[#070B12] border border-slate-800 rounded-lg p-3 font-mono text-slate-300 overflow-x-auto">
+                        {app.installCommands.install.join('\n')}
+                      </pre>
+                    </div>
+                  )}
+                  {(app.installCommands.start || []).length > 0 && (
+                    <div>
+                      <p className="text-slate-400 mb-1">3. Service Engine Entrypoint</p>
+                      <pre className="bg-[#070B12] border border-slate-800 rounded-lg p-3 font-mono text-slate-300 overflow-x-auto">
+                        {app.installCommands.start.join('\n')}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {app.healthCheck && (
+                <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <p className="text-slate-400">Probe Type</p>
+                    <p className="font-mono uppercase text-slate-200 mt-0.5">{app.healthCheck.type}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Endpoint / Path</p>
+                    <p className="font-mono text-slate-200 mt-0.5 truncate">{app.healthCheck.path}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Expected Status</p>
+                    <p className="font-mono tabular-nums text-slate-200 mt-0.5">
+                      {(app.healthCheck.expectedStatus || []).join(', ')}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400">Interval / Timeout</p>
+                    <p className="font-mono tabular-nums text-slate-200 mt-0.5">
+                      {app.healthCheck.intervalSeconds}s / {app.healthCheck.timeoutMs}ms
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Troubleshooting */}
           <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">

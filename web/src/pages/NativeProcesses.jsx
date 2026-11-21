@@ -103,8 +103,10 @@ export default function NativeProcesses() {
         workingDir: form.workingDir.trim() || undefined,
         port: form.port ? Number(form.port) : undefined,
         domain: form.domain.trim() || undefined,
+        autoDomain: Boolean(form.domain.trim()),
       }
-      const res = await apiPost('/processes', payload)
+      const res = await apiPost('/services', payload)
+      const spawned = res.service || res.process
       setShowModal(false)
       setForm({
         name: '',
@@ -116,11 +118,11 @@ export default function NativeProcesses() {
       })
       setFeedback({
         type: 'success',
-        text: `Spawned "${res.process?.name}" (PID ${res.process?.pid}) on port ${res.process?.port}.`,
+        text: `Service Engine spawned "${spawned?.name}" (PID ${spawned?.pid}) on port ${spawned?.port}.`,
       })
       await loadProcesses()
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'Could not start binary process' })
+      setFeedback({ type: 'error', text: err.message || 'Could not start native service' })
     } finally {
       setSpawning(false)
     }
@@ -264,8 +266,9 @@ export default function NativeProcesses() {
           <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 p-1 rounded-lg">
             {[
               { id: 'all', label: 'All Native' },
-              { id: 'binary', label: 'Custom Binaries' },
-              { id: 'local-app', label: 'Managed Apps' },
+              { id: 'service-engine', label: 'Service Engine' },
+              { id: 'app-store', label: 'App Store' },
+              { id: 'binary', label: 'Binaries' },
             ].map((item) => (
               <button
                 key={item.id}
@@ -371,8 +374,21 @@ export default function NativeProcesses() {
                           <div className="flex items-center gap-2">
                             <p className="font-semibold text-sm text-slate-100 truncate">{proc.name}</p>
                             <span className="text-[11px] text-slate-400 shrink-0">
-                              {proc.source === 'binary' ? 'Binary' : 'App'}
+                              {proc.source === 'app-store'
+                                ? 'App Store'
+                                : proc.source === 'service-engine'
+                                ? 'Service'
+                                : 'Binary'}
                             </span>
+                            {isRunning && proc.lastHealth && (
+                              <span
+                                className={`text-[11px] shrink-0 ${
+                                  proc.lastHealth.ok ? 'text-emerald-400' : 'text-amber-400'
+                                }`}
+                              >
+                                {proc.lastHealth.ok ? '· Healthy' : '· Unhealthy'}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-slate-400 font-mono truncate" title={proc.command}>
                             {proc.command || proc.runtimeLabel}

@@ -11,8 +11,10 @@ import multer from 'multer'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MemoryStore } from './src/store.ts'
 import {
-  SERVICE_TEMPLATES,
-  CATEGORY_DEFINITIONS,
+  loadCentralRegistry,
+  reloadCentralRegistry,
+  getRegistryAppById,
+  getRegistryApplications,
   getTemplateById,
 } from './src/templates.ts'
 import {
@@ -26,6 +28,7 @@ import {
 } from './src/localRuntime.ts'
 import { NativeProcessService, type NativeProcessInstance } from './src/nativeProcess.ts'
 import { AppInstallerEngine, detectHostRuntimes, type InstalledAppRecord } from './src/installerEngine.ts'
+import { ServiceManager, type ManagedServiceRecord } from './src/serviceManager.ts'
 import { ProxyConfigManager } from './src/proxyConfig.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -62,17 +65,27 @@ if (loadedProxyConfig) {
 }
 
 const localRuntime = new LocalRuntimeManager()
+const serviceEngine: ServiceManager = new ServiceManager({
+  appsRoot: localRuntime.getAppsRoot(),
+  isPortReserved: (port: number, excludeId?: string): boolean =>
+    localRuntime.listApps().some((a) => a.port === port) ||
+    nativeProcesses.listProcesses().some((p) => p.port === port) ||
+    installerEngine.listAll().some((i) => i.id !== excludeId && i.port === port),
+})
 const nativeProcesses: NativeProcessService = new NativeProcessService({
   appsRoot: localRuntime.getAppsRoot(),
   isPortReserved: (port: number): boolean =>
     localRuntime.listApps().some((a) => a.port === port) ||
-    installerEngine.listAll().some((i) => i.port === port),
+    installerEngine.listAll().some((i) => i.port === port) ||
+    serviceEngine.listServices().some((s) => s.port === port),
 })
 const installerEngine: AppInstallerEngine = new AppInstallerEngine({
   appsRoot: localRuntime.getAppsRoot(),
+  serviceEngine,
   isPortReserved: (port: number): boolean =>
     localRuntime.listApps().some((a) => a.port === port) ||
-    nativeProcesses.listProcesses().some((p) => p.port === port),
+    nativeProcesses.listProcesses().some((p) => p.port === port) ||
+    serviceEngine.listServices().some((s) => s.port === port),
 })
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
 
@@ -179,7 +192,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     const targetApp =
       localRuntime.findByName(requestedName) ||
       nativeProcesses.findByName(requestedName) ||
-      installerEngine.findByName(requestedName)
+      installerEngine.findByName(requestedName) ||
+      serviceEngine.findByName(requestedName)
     if (!targetApp) {
       res.status(404).send(`App "${requestedName}" is not installed.`)
       return
@@ -393,11 +407,20 @@ function serializeInstallation(rec: InstalledAppRecord) {
   return attachProxyDomains(installerEngine.serializeInstallation(rec))
 }
 
+function serializeServiceRecord(svc: ManagedServiceRecord) {
+  return attachProxyDomains(serviceEngine.serializeService(svc))
+}
+
 function listAllSerializedWorkload() {
   const apps = localRuntime.listApps().map(serializeLocalApp)
   const binaries = nativeProcesses.listProcesses().map(serializeNativeProcess)
   const installed = installerEngine.listAll().map(serializeInstallation)
-  return [...apps, ...binaries, ...installed].sort((a, b) => b.created - a.created)
+  const installedIds = new Set(installed.map((i) => i.id))
+  const standaloneServices = serviceEngine
+    .listServices()
+    .filter((s) => !installedIds.has(s.id))
+    .map(serializeServiceRecord)
+  return [...apps, ...binaries, ...installed, ...standaloneServices].sort((a, b) => b.created - a.created)
 }
 
 function getAllRunningForMetrics() {
@@ -413,7 +436,12 @@ function getAllRunningForMetrics() {
     .listAll()
     .filter((r) => r.state === 'running')
     .map((r) => ({ id: r.id, name: r.name, pid: r.pid }))
-  return [...apps, ...bins, ...installed]
+  const installedIds = new Set(installed.map((i) => i.id))
+  const services = serviceEngine
+    .listServices()
+    .filter((s) => s.state === 'running' && !installedIds.has(s.id))
+    .map((s) => ({ id: s.id, name: s.name, pid: s.pid }))
+  return [...apps, ...bins, ...installed, ...services]
 }
 
 // ==================== SYSTEM ====================
@@ -871,6 +899,11 @@ api.post('/containers/:id/start', async (req: Request, res: Response) => {
       res.json({ status: 'started', app: serializeNativeProcess(procItem) })
       return
     }
+    const svcItem = await serviceEngine.startService(id)
+    if (svcItem) {
+      res.json({ status: 'started', app: serializeServiceRecord(svcItem) })
+      return
+    }
   } catch (err) {
     res.status(400).json({ error: (err as Error).message || 'Failed to start process' })
     return
@@ -895,6 +928,11 @@ api.post('/containers/:id/stop', async (req: Request, res: Response) => {
     res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
     return
   }
+  const svcItem = await serviceEngine.stopService(id)
+  if (svcItem) {
+    res.json({ status: 'stopped', app: serializeServiceRecord(svcItem) })
+    return
+  }
   res.status(404).json({ error: 'app not found' })
 })
 
@@ -913,6 +951,11 @@ api.post('/containers/:id/pause', async (req: Request, res: Response) => {
   const procItem = await nativeProcesses.stopProcess(id)
   if (procItem) {
     res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
+    return
+  }
+  const svcItem = await serviceEngine.stopService(id)
+  if (svcItem) {
+    res.json({ status: 'stopped', app: serializeServiceRecord(svcItem) })
     return
   }
   res.status(404).json({ error: 'app not found' })
@@ -934,6 +977,11 @@ api.post('/containers/:id/restart', async (req: Request, res: Response) => {
     const procItem = await nativeProcesses.restartProcess(id)
     if (procItem) {
       res.json({ status: 'restarted', app: serializeNativeProcess(procItem) })
+      return
+    }
+    const svcItem = await serviceEngine.restartService(id)
+    if (svcItem) {
+      res.json({ status: 'restarted', app: serializeServiceRecord(svcItem) })
       return
     }
   } catch (err) {
@@ -972,6 +1020,15 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     res.json({ status: 'deleted' })
     return
   }
+  const existingSvc = serviceEngine.getService(id)
+  if (existingSvc) {
+    const oldPort = existingSvc.port
+    await serviceEngine.deleteService(existingSvc.id)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
+    proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    res.json({ status: 'deleted' })
+    return
+  }
   res.status(404).json({ error: 'app not found' })
 })
 
@@ -979,11 +1036,14 @@ api.get('/containers/:id/logs', (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appLines = localRuntime.getAppLogs(id, 150)
   const inst = installerEngine.installations.get(id) || installerEngine.findByName(id)
+  const svcLines = serviceEngine.getLogs(id, 150)
   const lines =
     appLines.length > 0
       ? appLines
       : inst
       ? inst.logs.slice(-150)
+      : svcLines.length > 0
+      ? svcLines
       : nativeProcesses.getLogs(id, 150)
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
@@ -995,7 +1055,8 @@ api.post('/apps/:id/domain', (req: Request, res: Response) => {
   const targetApp = localRuntime.apps.get(key) || localRuntime.findByName(key)
   const targetBin = nativeProcesses.getProcess(key)
   const targetInst = installerEngine.installations.get(key) || installerEngine.findByName(key)
-  const target = targetApp || targetBin || targetInst
+  const targetSvc = serviceEngine.getService(key)
+  const target = targetApp || targetBin || targetInst || targetSvc
   if (!target) {
     res.status(404).json({ error: 'app not found' })
     return
@@ -1012,6 +1073,8 @@ api.post('/apps/:id/domain', (req: Request, res: Response) => {
       ? serializeLocalApp(targetApp)
       : targetInst
       ? serializeInstallation(targetInst)
+      : targetSvc
+      ? serializeServiceRecord(targetSvc)
       : serializeNativeProcess(targetBin!),
   })
 })
@@ -1701,7 +1764,7 @@ api.post('/backups/import', upload.single('file'), (req: Request, res: Response)
   res.json({ status: 'imported', message: 'Backup archive imported successfully.' })
 })
 
-// ==================== APP STORE, RUNTIMES & INSTALLATION ENGINE ====================
+// ==================== APP STORE, CENTRAL JSON REGISTRY & SERVICE ENGINE ====================
 
 api.get('/runtimes', async (req: Request, res: Response) => {
   const report = await detectHostRuntimes(req.query.refresh === 'true')
@@ -1718,7 +1781,8 @@ function filterAndSortTemplates(query: Request['query']) {
   const q = String(query.q || '').trim().toLowerCase()
   const sort = String(query.sort || 'popular').trim().toLowerCase()
 
-  let list = SERVICE_TEMPLATES.filter((t) => {
+  const allApps = getRegistryApplications()
+  let list = allApps.filter((t) => {
     if (category && t.category !== category) return false
     if (compatibility && t.compatibility !== compatibility) return false
     if (difficulty && t.difficulty !== difficulty) return false
@@ -1751,6 +1815,220 @@ function filterAndSortTemplates(query: Request['query']) {
   return list
 }
 
+// Central JSON Registry API endpoints
+api.get('/registry', (req: Request, res: Response) => {
+  const registry = loadCentralRegistry()
+  const counts: Record<string, number> = {}
+  for (const appItem of registry.applications) {
+    counts[appItem.category] = (counts[appItem.category] || 0) + 1
+  }
+  const filtered = filterAndSortTemplates(req.query)
+  res.json({
+    schemaVersion: registry.schemaVersion,
+    updatedAt: registry.updatedAt,
+    registryFile: 'data/registry.json',
+    totalApps: registry.applications.length,
+    categoryCounts: counts,
+    categories: registry.categories,
+    compatibilityLabels: registry.compatibilityLabels,
+    applications: filtered,
+  })
+})
+
+api.get('/registry/apps/:id', (req: Request, res: Response) => {
+  const appItem = getRegistryAppById(String(req.params.id))
+  if (!appItem) {
+    res.status(404).json({ error: 'Application not found in central registry' })
+    return
+  }
+  res.json(appItem)
+})
+
+api.post('/registry/reload', (_req: Request, res: Response) => {
+  const reloaded = reloadCentralRegistry()
+  res.json({
+    status: 'reloaded',
+    schemaVersion: reloaded.schemaVersion,
+    updatedAt: reloaded.updatedAt,
+    totalApps: reloaded.applications.length,
+  })
+})
+
+// Service Engine API endpoints (Node.js child_process supervision, PID tracking, logs, lifecycle & resources)
+api.get('/services', (req: Request, res: Response) => {
+  const stateFilter = String(req.query.state || '').trim().toLowerCase()
+  const list = serviceEngine.listServices().map(serializeServiceRecord)
+  const filtered = stateFilter ? list.filter((s) => s.state === stateFilter) : list
+  const running = list.filter((s) => s.state === 'running')
+  res.json({
+    services: filtered,
+    summary: {
+      total: list.length,
+      running: running.length,
+      exited: list.length - running.length,
+      totalCpuPercent: Number(running.reduce((sum, s) => sum + (s.cpuPercent || 0), 0).toFixed(1)),
+      totalMemoryMb: Number(running.reduce((sum, s) => sum + (s.memoryMb || 0), 0).toFixed(1)),
+    },
+  })
+})
+
+api.post('/services', async (req: Request, res: Response) => {
+  const templateId = typeof req.body?.templateId === 'string' ? req.body.templateId.trim() : ''
+  const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
+  if (customDomain && !isValidDomainName(customDomain)) {
+    res.status(400).json({ error: 'Invalid domain name format' })
+    return
+  }
+
+  let envObj: Record<string, string> = {}
+  if (Array.isArray(req.body?.env)) {
+    envObj = parseEnvMap(req.body.env)
+  } else if (req.body?.env && typeof req.body.env === 'object') {
+    for (const [k, v] of Object.entries(req.body.env)) {
+      envObj[String(k)] = String(v ?? '')
+    }
+  }
+
+  try {
+    let svc: ManagedServiceRecord
+    if (templateId && !req.body?.executable) {
+      svc = await serviceEngine.spawnFromRegistry({
+        templateId,
+        name: typeof req.body?.name === 'string' ? req.body.name : undefined,
+        port: req.body?.port ? Number(req.body.port) : undefined,
+        env: envObj,
+      })
+    } else {
+      const executable = String(req.body?.executable || req.body?.command || '').trim()
+      if (!executable) {
+        res.status(400).json({ error: 'executable command or templateId is required' })
+        return
+      }
+      const name = String(req.body?.name || executable).trim()
+      svc = await serviceEngine.registerAndSpawn({
+        name,
+        displayName: typeof req.body?.displayName === 'string' ? req.body.displayName : name,
+        templateId: templateId || null,
+        source: 'service-engine',
+        executable,
+        args: req.body?.args,
+        workingDir: typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined,
+        port: req.body?.port ? Number(req.body.port) : undefined,
+        env: envObj,
+        healthCheck: req.body?.healthCheck && typeof req.body.healthCheck === 'object' ? req.body.healthCheck : undefined,
+      })
+    }
+
+    const proxyRoute = upsertAppProxyRoute(svc.name, svc.port, customDomain, Boolean(req.body?.autoDomain))
+    res.status(201).json({
+      service: serializeServiceRecord(svc),
+      proxyRoute,
+      liveUrl: `/live/${svc.name}/`,
+    })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to spawn service' })
+  }
+})
+
+api.get('/services/:id', (req: Request, res: Response) => {
+  const svc = serviceEngine.getService(String(req.params.id))
+  if (!svc) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  res.json({
+    ...serializeServiceRecord(svc),
+    logs: svc.logs.slice(-150),
+  })
+})
+
+api.get('/services/:id/logs', (req: Request, res: Response) => {
+  const svc = serviceEngine.getService(String(req.params.id))
+  if (!svc) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  const tail = Math.min(1000, Math.max(10, Number(req.query.tail) || 200))
+  const q = typeof req.query.q === 'string' ? req.query.q : ''
+  const entries = serviceEngine.getLogs(svc.id, tail, q)
+  res.json({
+    serviceId: svc.id,
+    pid: svc.pid,
+    entries,
+    logs: entries.map((l) => `${l.timestamp} [${l.stream}] ${l.content}`).join('\n'),
+  })
+})
+
+api.get('/services/:id/metrics', (req: Request, res: Response) => {
+  const metrics = serviceEngine.getMetricsHistory(String(req.params.id))
+  if (!metrics) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  res.json(metrics)
+})
+
+api.post('/services/:id/start', async (req: Request, res: Response) => {
+  try {
+    const svc = await serviceEngine.startService(String(req.params.id))
+    if (!svc) {
+      res.status(404).json({ error: 'service not found' })
+      return
+    }
+    res.json({ status: 'started', service: serializeServiceRecord(svc) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to start service' })
+  }
+})
+
+api.post('/services/:id/stop', async (req: Request, res: Response) => {
+  const svc = await serviceEngine.stopService(String(req.params.id))
+  if (!svc) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  res.json({ status: 'stopped', service: serializeServiceRecord(svc) })
+})
+
+api.post('/services/:id/restart', async (req: Request, res: Response) => {
+  try {
+    const svc = await serviceEngine.restartService(String(req.params.id))
+    if (!svc) {
+      res.status(404).json({ error: 'service not found' })
+      return
+    }
+    res.json({ status: 'restarted', service: serializeServiceRecord(svc) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to restart service' })
+  }
+})
+
+api.post('/services/:id/health', async (req: Request, res: Response) => {
+  const health = await serviceEngine.runHealthCheck(String(req.params.id))
+  if (!health) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  res.json(health)
+})
+
+api.delete('/services/:id', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const svc = serviceEngine.getService(id)
+  if (!svc) {
+    res.status(404).json({ error: 'service not found' })
+    return
+  }
+  const oldPort = svc.port
+  const keepData = req.query.keepData === 'true'
+  await serviceEngine.deleteService(svc.id, keepData)
+  store.proxyRoutes = store.proxyRoutes.filter(
+    (r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`
+  )
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  res.json({ status: 'deleted' })
+})
+
 api.get('/templates', (req: Request, res: Response) => {
   res.json(filterAndSortTemplates(req.query))
 })
@@ -1760,14 +2038,15 @@ api.get('/templates/search', (req: Request, res: Response) => {
 })
 
 api.get('/templates/categories', (_req: Request, res: Response) => {
+  const registry = loadCentralRegistry()
   const counts: Record<string, number> = {}
-  for (const t of SERVICE_TEMPLATES) {
+  for (const t of registry.applications) {
     counts[t.category] = (counts[t.category] || 0) + 1
   }
   res.json({
     counts,
-    definitions: CATEGORY_DEFINITIONS,
-    total: SERVICE_TEMPLATES.length,
+    definitions: registry.categories,
+    total: registry.applications.length,
   })
 })
 

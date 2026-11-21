@@ -17,6 +17,7 @@ import {
   formatProcessUptime,
 } from './nativeProcess.ts'
 import { getTemplateById, type ServiceTemplate } from './templates.ts'
+import type { ServiceManager } from './serviceManager.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -313,11 +314,17 @@ export class AppInstallerEngine {
   installations = new Map<string, InstalledAppRecord>()
   private appsRoot: string
   private isPortExternallyReserved: (port: number) => boolean
+  private serviceEngine?: ServiceManager
 
-  constructor(opts: { appsRoot: string; isPortReserved?: (port: number) => boolean }) {
+  constructor(opts: {
+    appsRoot: string
+    isPortReserved?: (port: number) => boolean
+    serviceEngine?: ServiceManager
+  }) {
     this.appsRoot = path.resolve(opts.appsRoot)
     fs.mkdirSync(this.appsRoot, { recursive: true })
     this.isPortExternallyReserved = opts.isPortReserved || (() => false)
+    this.serviceEngine = opts.serviceEngine
 
     const cleanupAll = () => this.shutdownAllSync()
     process.once('exit', cleanupAll)
@@ -918,21 +925,50 @@ export class AppInstallerEngine {
   }
 
   async spawnRecordProcess(rec: InstalledAppRecord): Promise<void> {
+    const tmpl = getTemplateById(rec.templateId)
+    const rawTemplateArgs = tmpl?.installSpec
+      ? tmpl.installSpec.npmArgs ||
+        tmpl.installSpec.pythonArgs ||
+        tmpl.installSpec.binaryArgs ||
+        tmpl.installSpec.systemArgs
+      : undefined
+
+    if (this.serviceEngine) {
+      const argsForEngine = rawTemplateArgs && rawTemplateArgs.length > 0 ? rawTemplateArgs : rec.args
+      const svc = await this.serviceEngine.registerAndSpawn({
+        id: rec.id,
+        name: rec.name,
+        displayName: rec.displayName,
+        templateId: rec.templateId,
+        source: 'app-store',
+        runtime: rec.runtime,
+        executable: rec.executable,
+        args: argsForEngine,
+        workingDir: rec.appDir,
+        dataDir: rec.dataDir,
+        port: rec.port,
+        env: rec.env,
+        healthCheck: tmpl?.healthCheck,
+      })
+      rec.port = svc.port
+      rec.pid = svc.pid
+      rec.state = svc.state
+      rec.startedAt = svc.startedAt
+      rec.lastExitCode = svc.lastExitCode
+      rec.lastHealth = svc.lastHealth
+      rec.args = svc.args.map((a) => this.resolvePlaceholders(a, rec))
+      this.appendLog(rec, 'system', `[${rec.name}] Supervised by ServiceEngine (PID ${svc.pid}, port ${svc.port})`)
+      return
+    }
+
+    if (rawTemplateArgs && rawTemplateArgs.length > 0) {
+      rec.args = rawTemplateArgs.map((a) => this.resolvePlaceholders(a, rec))
+    }
+
     if (rec.child && rec.state === 'running') {
       await this.stopApp(rec.id)
     }
     rec.port = await this.allocateFreePort(rec.port)
-    const tmpl = getTemplateById(rec.templateId)
-    if (tmpl?.installSpec) {
-      const rawArgs =
-        tmpl.installSpec.npmArgs ||
-        tmpl.installSpec.pythonArgs ||
-        tmpl.installSpec.binaryArgs ||
-        tmpl.installSpec.systemArgs
-      if (rawArgs && rawArgs.length > 0) {
-        rec.args = rawArgs.map((a) => this.resolvePlaceholders(a, rec))
-      }
-    }
 
     const childEnv: NodeJS.ProcessEnv = {
       ...process.env,
@@ -989,6 +1025,17 @@ export class AppInstallerEngine {
   async startApp(id: string): Promise<InstalledAppRecord | null> {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return null
+    if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
+      const svc = await this.serviceEngine.startService(rec.id)
+      if (svc) {
+        rec.pid = svc.pid
+        rec.state = svc.state
+        rec.port = svc.port
+        rec.startedAt = svc.startedAt
+        rec.lastHealth = svc.lastHealth
+        return rec
+      }
+    }
     await this.spawnRecordProcess(rec)
     return rec
   }
@@ -996,6 +1043,9 @@ export class AppInstallerEngine {
   async stopApp(id: string): Promise<InstalledAppRecord | null> {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return null
+    if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
+      await this.serviceEngine.stopService(rec.id)
+    }
     const child = rec.child
     if (child && !child.killed) {
       await new Promise<void>((resolve) => {
@@ -1028,6 +1078,17 @@ export class AppInstallerEngine {
   async restartApp(id: string): Promise<InstalledAppRecord | null> {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return null
+    if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
+      const svc = await this.serviceEngine.restartService(rec.id)
+      if (svc) {
+        rec.pid = svc.pid
+        rec.state = svc.state
+        rec.port = svc.port
+        rec.startedAt = svc.startedAt
+        rec.lastHealth = svc.lastHealth
+        return rec
+      }
+    }
     await this.stopApp(rec.id)
     await this.spawnRecordProcess(rec)
     return rec
@@ -1036,6 +1097,13 @@ export class AppInstallerEngine {
   async checkHealth(id: string) {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return null
+    if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
+      const res = await this.serviceEngine.runHealthCheck(rec.id)
+      if (res) {
+        rec.lastHealth = res
+        return res
+      }
+    }
     const probe = await probeLocalHttp(rec.port, rec.healthCheckPath)
     rec.lastHealth = { ...probe, checkedAt: new Date().toISOString() }
     return rec.lastHealth
@@ -1045,6 +1113,10 @@ export class AppInstallerEngine {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return null
     rec.env = sanitizeProcessEnv(envMap)
+    const svc = this.serviceEngine?.getService(rec.id)
+    if (svc) {
+      svc.env = { ...rec.env }
+    }
     const envPath = path.join(rec.appDir, '.env')
     const envText = Object.entries(rec.env)
       .map(([k, v]) => `${k}=${v}`)
@@ -1058,6 +1130,9 @@ export class AppInstallerEngine {
     const rec = this.installations.get(id) || this.findByName(id)
     if (!rec) return { deleted: false, keptDataDir: null }
     await this.stopApp(rec.id)
+    if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
+      await this.serviceEngine.deleteService(rec.id, true)
+    }
     this.installations.delete(rec.id)
 
     let keptDataDir: string | null = null
@@ -1088,17 +1163,37 @@ export class AppInstallerEngine {
   }
 
   serializeInstallation(rec: InstalledAppRecord) {
-    const { uptimeSeconds, uptimeLabel } =
-      rec.state === 'running'
-        ? formatProcessUptime(rec.startedAt)
-        : {
-            uptimeSeconds: 0,
-            uptimeLabel: rec.lastExitCode !== null ? `Exited (${rec.lastExitCode})` : 'Stopped',
-          }
-    const telemetry =
-      rec.state === 'running'
-        ? samplePidResourceMetrics(rec.pid)
-        : { cpuPercent: 0, memoryBytes: 0, memoryMb: 0, memoryPercent: 0, threads: 0 }
+    const svc = this.serviceEngine?.getService(rec.id)
+    const svcView = svc ? this.serviceEngine!.serializeService(svc) : null
+    if (svcView) {
+      rec.pid = svcView.pid
+      rec.state = svcView.state
+      rec.lastHealth = svcView.lastHealth
+    }
+
+    const { uptimeSeconds, uptimeLabel } = svcView
+      ? { uptimeSeconds: svcView.uptimeSeconds, uptimeLabel: svcView.uptimeLabel }
+      : rec.state === 'running'
+      ? formatProcessUptime(rec.startedAt)
+      : {
+          uptimeSeconds: 0,
+          uptimeLabel: rec.lastExitCode !== null ? `Exited (${rec.lastExitCode})` : 'Stopped',
+        }
+    const telemetry = svcView
+      ? {
+          cpuPercent: svcView.cpuPercent,
+          memoryBytes: svcView.memoryBytes,
+          memoryMb: svcView.memoryMb,
+          memoryPercent: svcView.memoryPercent,
+          threads: svcView.threads,
+        }
+      : rec.state === 'running'
+      ? samplePidResourceMetrics(rec.pid)
+      : { cpuPercent: 0, memoryBytes: 0, memoryMb: 0, memoryPercent: 0, threads: 0 }
+
+    const mergedLogs = svc
+      ? [...rec.logs.slice(-80), ...svc.logs.slice(-80)].slice(-120)
+      : rec.logs.slice(-120)
 
     return {
       id: rec.id,
@@ -1130,6 +1225,8 @@ export class AppInstallerEngine {
       memoryPercent: telemetry.memoryPercent,
       threads: telemetry.threads,
       pid: rec.pid,
+      restartCount: svcView?.restartCount ?? 0,
+      metricsHistory: svcView?.metricsHistory ?? [],
       installStatus: rec.installStatus,
       phase: rec.phase,
       progress: rec.progress,
@@ -1139,7 +1236,7 @@ export class AppInstallerEngine {
       liveUrl: `/live/${rec.name}/`,
       installedAt: rec.installedAt,
       created: rec.created,
-      logs: rec.logs.slice(-120),
+      logs: mergedLogs,
     }
   }
 }

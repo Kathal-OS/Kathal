@@ -35,6 +35,23 @@ export interface AppConfigTemplate {
   content: string
 }
 
+export interface AppInstallCommands {
+  mode: 'node' | 'python' | 'binary' | 'git' | 'system' | 'docker' | 'external'
+  prepare: string[]
+  install: string[]
+  start: string[]
+  env: Record<string, string>
+}
+
+export interface AppHealthCheckDefinition {
+  type: 'http' | 'tcp'
+  path: string
+  expectedStatus: number[]
+  intervalSeconds: number
+  timeoutMs: number
+  retries: number
+}
+
 export interface AppInstallSpec {
   npmPackage?: string
   npmBin?: string
@@ -85,6 +102,8 @@ export interface ServiceTemplateInput {
   requirements?: string[]
   dependencies?: string[]
   healthCheckPath?: string
+  healthCheck?: Partial<AppHealthCheckDefinition>
+  installCommands?: Partial<AppInstallCommands>
   configTemplate?: AppConfigTemplate
   installSpec?: AppInstallSpec
   configInstructions?: string[]
@@ -103,6 +122,8 @@ export interface ServiceTemplate extends ServiceTemplateInput {
   requirements: string[]
   dependencies: string[]
   healthCheckPath: string
+  healthCheck: AppHealthCheckDefinition
+  installCommands: AppInstallCommands
   configTemplate: AppConfigTemplate
   configInstructions: string[]
   troubleshooting: { issue: string; fix: string }[]
@@ -119,6 +140,142 @@ const DEFAULT_CATEGORY_COLORS: Record<AppCategoryId, string> = {
   media: '#f97316',
   networking: '#06b6d4',
   automation: '#cc482e',
+}
+
+function parseEnvRecord(envList: string[], defaultPort: number): Record<string, string> {
+  const out: Record<string, string> = {
+    PORT: '{PORT}',
+    HOST: '127.0.0.1',
+    DATA_DIR: '{DATA_DIR}',
+  }
+  for (const item of envList || []) {
+    const idx = item.indexOf('=')
+    if (idx > 0) {
+      out[item.slice(0, idx).trim()] = item.slice(idx + 1).trim()
+    }
+  }
+  if (!out.PORT) out.PORT = String(defaultPort)
+  return out
+}
+
+function buildInstallCommands(input: ServiceTemplateInput, defaultPort: number): AppInstallCommands {
+  const spec = input.installSpec || {}
+  const env = parseEnvRecord(input.env_vars, defaultPort)
+
+  if (input.installCommands?.mode) {
+    return {
+      mode: input.installCommands.mode,
+      prepare: input.installCommands.prepare || [],
+      install: input.installCommands.install || [],
+      start: input.installCommands.start || [],
+      env: input.installCommands.env || env,
+    }
+  }
+
+  if (input.installMethod === 'npm') {
+    const pkg = spec.npmPackage || input.id
+    const bin = spec.npmBin || pkg.split('/').pop() || input.id
+    const args = (spec.npmArgs || []).join(' ')
+    return {
+      mode: 'node',
+      prepare: ['mkdir -p {DIR}/data', 'npm init -y'],
+      install: [`npm install --no-audit --no-fund --omit=dev ${pkg}`],
+      start: [`{DIR}/node_modules/.bin/${bin}${args ? ` ${args}` : ''}`],
+      env,
+    }
+  }
+
+  if (input.installMethod === 'python-venv') {
+    const pkg = spec.pythonPackage || input.id
+    const bin = spec.pythonBin || 'python3'
+    const args = (spec.pythonArgs || []).join(' ')
+    return {
+      mode: 'python',
+      prepare: ['mkdir -p {DIR}/data', 'python3 -m venv {DIR}/.venv'],
+      install: [`{DIR}/.venv/bin/pip install --no-input ${pkg}`],
+      start: [`{DIR}/.venv/bin/${bin}${args ? ` ${args}` : ''}`],
+      env,
+    }
+  }
+
+  if (input.installMethod === 'binary-download') {
+    const url = spec.binaryUrls?.linux_x64 || spec.binaryUrls?.linux_arm64 || ''
+    const archive = spec.binaryArchive || 'raw'
+    const binName = spec.binaryName || input.id
+    const args = (spec.binaryArgs || []).join(' ')
+    const extractStep =
+      archive === 'zip'
+        ? 'unzip -o {DIR}/download.zip -d {DIR}/bin'
+        : archive === 'tar.gz'
+        ? 'tar -xzf {DIR}/download.tar.gz -C {DIR}/bin'
+        : archive === 'bz2'
+        ? 'bzip2 -df {DIR}/download.bz2'
+        : `chmod +x {DIR}/bin/${binName}`
+    return {
+      mode: 'binary',
+      prepare: ['mkdir -p {DIR}/bin {DIR}/data'],
+      install: url
+        ? [`curl -fsSL --proto =https --tlsv1.2 -o {DIR}/${archive === 'raw' ? `bin/${binName}` : `download.${archive}`} ${url}`, extractStep]
+        : [`# Download ${input.name} binary from ${input.github}/releases`],
+      start: [`{DIR}/bin/${binName}${args ? ` ${args}` : ''}`],
+      env,
+    }
+  }
+
+  if (input.installMethod === 'git') {
+    const repo = spec.gitRepo || input.github
+    const branch = spec.gitBranch || 'main'
+    return {
+      mode: 'git',
+      prepare: ['mkdir -p {DIR}/data'],
+      install: [`git clone --depth 1 --branch ${branch} ${repo} {DIR}`, 'npm install --no-audit --no-fund --omit=dev'],
+      start: [input.command || 'npm run start'],
+      env,
+    }
+  }
+
+  if (input.installMethod === 'system-binary') {
+    const bin = spec.systemBinary || input.id
+    const args = (spec.systemArgs || []).join(' ')
+    return {
+      mode: 'system',
+      prepare: ['mkdir -p {DIR}/data'],
+      install: [`which ${bin} || # Install ${input.name} via system package manager`],
+      start: [`${bin}${args ? ` ${args}` : ''}`],
+      env,
+    }
+  }
+
+  if (input.installMethod === 'docker-required' || !input.dockerFreeSupported) {
+    return {
+      mode: 'docker',
+      prepare: ['mkdir -p {DIR}/data'],
+      install: [`docker pull ${input.image}`],
+      start: [`docker run -d --name ${input.id} -p {PORT}:${defaultPort} ${input.image}`],
+      env,
+    }
+  }
+
+  return {
+    mode: 'external',
+    prepare: ['mkdir -p {DIR}/data'],
+    install: [spec.installNotes || `# Follow official installation docs: ${input.docs}`],
+    start: [input.command || `# Launch ${input.name} on port {PORT}`],
+    env,
+  }
+}
+
+function buildHealthCheck(input: ServiceTemplateInput): AppHealthCheckDefinition {
+  const tcpOnlyIds = new Set(['postgres', 'mysql', 'mariadb', 'mongodb', 'redis', 'mosquitto', 'duckdb'])
+  const isTcp = tcpOnlyIds.has(input.id) || (input.category === 'databases' && input.healthCheckPath === undefined && ['postgres', 'mysql', 'mariadb', 'mongodb', 'redis'].includes(input.id))
+  return {
+    type: input.healthCheck?.type || (isTcp ? 'tcp' : 'http'),
+    path: input.healthCheck?.path || input.healthCheckPath || '/',
+    expectedStatus: input.healthCheck?.expectedStatus || [200, 204, 301, 302, 401],
+    intervalSeconds: input.healthCheck?.intervalSeconds || 30,
+    timeoutMs: input.healthCheck?.timeoutMs || 3000,
+    retries: input.healthCheck?.retries || 3,
+  }
 }
 
 export function hydrateTemplate(input: ServiceTemplateInput, index: number): ServiceTemplate {
@@ -152,6 +309,9 @@ export function hydrateTemplate(input: ServiceTemplateInput, index: number): Ser
       ? ['PostgreSQL or external database']
       : ['Self-contained runtime']
 
+  const healthCheck = buildHealthCheck(input)
+  const installCommands = buildInstallCommands(input, defaultPort)
+
   return {
     ...input,
     overview:
@@ -173,7 +333,9 @@ export function hydrateTemplate(input: ServiceTemplateInput, index: number): Ser
     featured: Boolean(input.featured),
     requirements: defaultRequirements,
     dependencies: defaultDependencies,
-    healthCheckPath: input.healthCheckPath || '/',
+    healthCheckPath: healthCheck.path,
+    healthCheck,
+    installCommands,
     configTemplate: input.configTemplate || {
       filename: '.env',
       format: 'env',
