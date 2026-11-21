@@ -11,6 +11,17 @@ import multer from 'multer'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MemoryStore } from './src/store.ts'
 import { SERVICE_TEMPLATES } from './src/templates.ts'
+import {
+  LocalRuntimeManager,
+  type LocalAppInstance,
+  isValidPublicHttpsGitUrl,
+  isValidDomainName,
+  validateLocalProxyTarget,
+  probeLocalHttp,
+  sanitizeAppName,
+} from './src/localRuntime.ts'
+import { NativeProcessService, type NativeProcessInstance } from './src/nativeProcess.ts'
+import { ProxyConfigManager } from './src/proxyConfig.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3000
@@ -25,11 +36,37 @@ const JWT_SECRET = process.env.KATHAL_JWT_SECRET || crypto.randomBytes(32).toStr
 let claimedAdmin: { email: string; passwordHash: string } | null = null
 
 const store = new MemoryStore()
+const proxyConfig = new ProxyConfigManager()
+const loadedProxyConfig = proxyConfig.loadFromDisk()
+if (loadedProxyConfig) {
+  store.proxyRoutes = loadedProxyConfig.routes.map((r) => ({
+    id: r.id,
+    domain: r.domain,
+    target: r.target,
+    port: r.port,
+    ssl: r.ssl,
+    enabled: r.enabled,
+  }))
+  store.settings.serverDomain = loadedProxyConfig.settings.serverDomain
+  store.settings.wildcardDomain = loadedProxyConfig.settings.wildcardDomain
+  store.settings.letsEncryptEmail = loadedProxyConfig.settings.letsEncryptEmail
+  store.settings.autoSsl = loadedProxyConfig.settings.autoSsl
+  store.settings.forceHttps = loadedProxyConfig.settings.forceHttps
+} else {
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+}
+
+const localRuntime = new LocalRuntimeManager()
+const nativeProcesses = new NativeProcessService({
+  appsRoot: localRuntime.getAppsRoot(),
+  isPortReserved: (port) => localRuntime.listApps().some((a) => a.port === port),
+})
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
 
 // Background monitoring sample collector (1 sample/sec, 60-sample ring buffer)
 const monitoringTimer = setInterval(() => {
-  store.pushMonitoringSample()
+  const runningApps = getAllRunningForMetrics()
+  store.pushMonitoringSample(runningApps)
 }, 1000)
 monitoringTimer.unref()
 
@@ -81,7 +118,93 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   }
 }
 
+function proxyToLocalPort(req: Request, res: Response, targetPort: number, forwardPath: string) {
+  const headers: http.OutgoingHttpHeaders = { ...req.headers }
+  headers.host = `127.0.0.1:${targetPort}`
+  headers['x-forwarded-host'] = req.headers.host || ''
+  headers['x-forwarded-proto'] = req.protocol || 'http'
+
+  const proxyReq = http.request(
+    {
+      hostname: '127.0.0.1',
+      port: targetPort,
+      path: forwardPath || '/',
+      method: req.method,
+      headers,
+      timeout: 15000,
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers)
+      proxyRes.pipe(res, { end: true })
+    }
+  )
+
+  proxyReq.on('timeout', () => {
+    proxyReq.destroy()
+    if (!res.headersSent) {
+      res.status(504).send('App took too long to respond.')
+    }
+  })
+
+  proxyReq.on('error', (err) => {
+    if (!res.headersSent) {
+      res.status(502).send(`Local app is unreachable on port ${targetPort}: ${err.message}`)
+    }
+  })
+
+  req.pipe(proxyReq, { end: true })
+}
+
 const app = express()
+
+// Live Reverse Proxy Middleware MUST run BEFORE express.json() so request bodies stream cleanly
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // 1. Built-in /live/<appName>/... path proxy (covers both local apps and native binary processes)
+  const liveMatch = /^\/live\/([a-z0-9-_]+)(\/.*)?$/i.exec(req.path)
+  if (liveMatch) {
+    const requestedName = sanitizeAppName(liveMatch[1])
+    const targetApp = localRuntime.findByName(requestedName) || nativeProcesses.findByName(requestedName)
+    if (!targetApp) {
+      res.status(404).send(`App "${requestedName}" is not installed.`)
+      return
+    }
+    if (targetApp.state !== 'running') {
+      res.status(503).send(`App "${targetApp.name}" is currently stopped. Start it in KATHAL to view.`)
+      return
+    }
+    // Redirect /live/<name> -> /live/<name>/ so relative fetches inside apps resolve cleanly
+    if (!liveMatch[2] && (req.method === 'GET' || req.method === 'HEAD')) {
+      const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : ''
+      res.redirect(302, `/live/${targetApp.name}/${qs}`)
+      return
+    }
+    const prefix = `/live/${liveMatch[1]}`
+    const orig = req.originalUrl.startsWith(prefix) ? req.originalUrl.slice(prefix.length) : '/'
+    const forwardPath = orig.startsWith('/') ? orig : `/${orig}`
+    proxyToLocalPort(req, res, targetApp.port, forwardPath)
+    return
+  }
+
+  // 2. Custom Domain (Host-header) routing backed by reverse-proxy.json
+  const rawHost = String(req.headers.host || '').split(':')[0].trim().toLowerCase()
+  if (rawHost && rawHost !== 'localhost' && rawHost !== '127.0.0.1' && rawHost !== '0.0.0.0') {
+    const activeRoutes = proxyConfig.getRoutesForInternalProxy(store.proxyRoutes)
+    const route = activeRoutes.find(
+      (r) => r.enabled && r.domain.trim().toLowerCase() === rawHost
+    )
+    if (route) {
+      const targetCheck = validateLocalProxyTarget(route.target)
+      if (targetCheck.ok) {
+        const port = Number(targetCheck.url.port || (targetCheck.url.protocol === 'https:' ? 443 : 80))
+        proxyToLocalPort(req, res, port, req.originalUrl || '/')
+        return
+      }
+    }
+  }
+
+  next()
+})
+
 app.use(express.json({ limit: '10mb' }))
 
 const api = express.Router()
@@ -164,31 +287,170 @@ api.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' })
 })
 
+// ==================== HELPER FUNCTIONS FOR LOCAL APPS ====================
+
+function parseEnvMap(rawEnv: unknown): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const v of store.envVars) {
+    result[v.key] = v.value
+  }
+  if (Array.isArray(rawEnv)) {
+    for (const item of rawEnv) {
+      const s = String(item || '')
+      const eq = s.indexOf('=')
+      if (eq > 0) result[s.slice(0, eq).trim()] = s.slice(eq + 1)
+    }
+  } else if (rawEnv && typeof rawEnv === 'object') {
+    for (const [k, v] of Object.entries(rawEnv)) {
+      if (k.trim()) result[k.trim()] = String(v ?? '')
+    }
+  }
+  return result
+}
+
+function upsertAppProxyRoute(
+  appName: string,
+  port: number,
+  customDomain?: string,
+  autoDomain?: boolean
+) {
+  const rawDomain = (customDomain || '').trim().toLowerCase()
+  const targetDomain = rawDomain
+    ? rawDomain
+    : autoDomain
+    ? `${appName}.${store.settings.wildcardDomain || 'apps.kathal.local'}`
+    : ''
+  if (!targetDomain) return null
+  if (!isValidDomainName(targetDomain)) {
+    throw new Error('Invalid domain name format (example: myapp.example.com)')
+  }
+  const targetUrl = `http://127.0.0.1:${port}`
+  const existing = store.proxyRoutes.find((r) => r.domain.toLowerCase() === targetDomain)
+  if (existing) {
+    existing.target = targetUrl
+    existing.port = store.settings.autoSsl ? 443 : 80
+    existing.ssl = store.settings.autoSsl
+    existing.enabled = true
+    proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    return existing
+  }
+  const route = {
+    id: store.newId('proxy'),
+    domain: targetDomain,
+    target: targetUrl,
+    port: store.settings.autoSsl ? 443 : 80,
+    ssl: store.settings.autoSsl,
+    enabled: true,
+  }
+  store.proxyRoutes.push(route)
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  return route
+}
+
+function attachProxyDomains<T extends { port: number }>(serialized: T) {
+  const domains = store.proxyRoutes
+    .filter((r) => {
+      const check = validateLocalProxyTarget(r.target)
+      return check.ok && Number(check.url.port) === serialized.port
+    })
+    .map((r) => ({
+      id: r.id,
+      domain: r.domain,
+      enabled: r.enabled,
+      ssl: r.ssl,
+    }))
+  return {
+    ...serialized,
+    domains,
+  }
+}
+
+function serializeLocalApp(localApp: LocalAppInstance) {
+  return attachProxyDomains(localRuntime.serializeApp(localApp))
+}
+
+function serializeNativeProcess(proc: NativeProcessInstance) {
+  return attachProxyDomains(nativeProcesses.serializeProcess(proc))
+}
+
+function listAllSerializedWorkload() {
+  const apps = localRuntime.listApps().map(serializeLocalApp)
+  const binaries = nativeProcesses.listProcesses().map(serializeNativeProcess)
+  return [...apps, ...binaries].sort((a, b) => b.created - a.created)
+}
+
+function getAllRunningForMetrics() {
+  const apps = localRuntime
+    .listApps()
+    .filter((a) => a.state === 'running')
+    .map((a) => ({ id: a.id, name: a.name, pid: a.pid }))
+  const bins = nativeProcesses
+    .listProcesses()
+    .filter((p) => p.state === 'running')
+    .map((p) => ({ id: p.id, name: p.name, pid: p.pid }))
+  return [...apps, ...bins]
+}
+
 // ==================== SYSTEM ====================
 
 api.get('/status', (_req: Request, res: Response) => {
+  const all = listAllSerializedWorkload()
+  const runningApps = all.filter((a) => a.state === 'running').length
   res.json({
     version: VERSION,
     platform: os.platform(),
     arch: os.arch(),
     goVersion: `Node ${process.version}`,
-    dockerAvailable: true,
-    dockerVersion: '26.1.0-sim',
-    dockerContainers: store.containers.length,
+    mode: 'local-native',
+    dockerAvailable: false,
+    runtimeEngine: 'Local Native Runtime (Node.js / Python 3 / Native Binaries)',
+    runtimes: {
+      node: process.version,
+      python: 'Python 3',
+      git: 'Git',
+      nativeBinary: 'Enabled',
+    },
+    appsRoot: localRuntime.getAppsRoot(),
+    dockerContainers: all.length,
+    runningApps,
+    nativeProcessCount: nativeProcesses.listProcesses().length,
     dockerImages: store.images.length,
+    desktopSupport: {
+      pwaManifest: '/manifest.webmanifest',
+      serviceWorker: '/sw.js',
+      electronAvailable: fs.existsSync(path.join(__dirname, 'electron', 'main.cjs')),
+      desktopCommand: 'npm run desktop',
+    },
+  })
+})
+
+api.get('/desktop/info', (_req: Request, res: Response) => {
+  res.json({
+    platform: os.platform(),
+    arch: os.arch(),
+    pwa: {
+      manifestUrl: '/manifest.webmanifest',
+      serviceWorkerUrl: '/sw.js',
+      icons: ['/pwa-192x192.png', '/pwa-512x512.png', '/pwa-maskable-512x512.png'],
+    },
+    electron: {
+      entryFile: 'electron/main.cjs',
+      exists: fs.existsSync(path.join(__dirname, 'electron', 'main.cjs')),
+      command: 'npm run desktop',
+    },
   })
 })
 
 api.get('/metrics', (_req: Request, res: Response) => {
   const sys = store.collectSystemMetrics()
-  const running = store.containers.filter((c) => c.state === 'running').length
-  const paused = store.containers.filter((c) => c.state === 'paused').length
-  const stopped = store.containers.filter((c) => c.state !== 'running' && c.state !== 'paused').length
+  const all = listAllSerializedWorkload()
+  const running = all.filter((a) => a.state === 'running').length
+  const stopped = all.filter((a) => a.state !== 'running').length
   res.json({
     system: sys,
     docker: {
       containersRunning: running,
-      containersPaused: paused,
+      containersPaused: 0,
       containersStopped: stopped,
       imagesCount: store.images.length,
     },
@@ -199,13 +461,15 @@ api.get('/metrics', (_req: Request, res: Response) => {
 api.get('/system', (_req: Request, res: Response) => {
   res.json({
     version: VERSION,
-    docker: true,
+    docker: false,
+    mode: 'local-native',
     goVersion: `Node ${process.version}`,
     hostname: os.hostname(),
   })
 })
 
 function handleCheckUpdates(_req: Request, res: Response) {
+  const all = listAllSerializedWorkload()
   res.json({
     currentVersion: VERSION,
     latestVersion: VERSION,
@@ -213,13 +477,8 @@ function handleCheckUpdates(_req: Request, res: Response) {
     channel: 'stable',
     checkedAt: new Date().toISOString(),
     runtime: `Node ${process.version}`,
-    imagesChecked: store.images.length,
-    images: store.images.map((img) => ({
-      id: img.id,
-      tag: img.repoTags[0] || '<none>',
-      status: 'up-to-date',
-    })),
-    message: `KATHAL OS v${VERSION} and all ${store.images.length} tracked images are up to date.`,
+    appsChecked: all.length,
+    message: `KATHAL OS v${VERSION} local runtime (${process.version}) is up to date across ${all.length} installed workload(s).`,
   })
 }
 
@@ -253,6 +512,7 @@ api.put('/settings', (req: Request, res: Response) => {
     const val = Number(b.memoryAlertThreshold)
     if (Number.isFinite(val)) store.settings.memoryAlertThreshold = Math.min(100, Math.max(10, val))
   }
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json(store.settings)
 })
 
@@ -263,133 +523,432 @@ api.post('/settings/regenerate-webhook', (_req: Request, res: Response) => {
 
 api.post('/settings/reset', (_req: Request, res: Response) => {
   store.resetToDefaults()
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json({ status: 'reset', settings: store.settings })
 })
 
-// ==================== UNIFIED DEPLOY ====================
+// ==================== UNIFIED LOCAL APP DEPLOY ====================
 
-api.post('/deploy', (req: Request, res: Response) => {
+async function handleDeployLocalRequest(req: Request, res: Response) {
   const name = String(req.body?.name || '').trim()
-  const image = String(req.body?.image || '').trim()
-  if (!name || !image) {
-    res.status(400).json({ error: 'name and image are required' })
+  if (!name) {
+    res.status(400).json({ error: 'App name is required' })
     return
   }
-  const hostPort = req.body?.hostPort ? Number(req.body.hostPort) : undefined
-  const containerPort = req.body?.containerPort ? Number(req.body.containerPort) : undefined
-  const result = store.deployService({
-    name,
-    image,
-    hostPort,
-    containerPort,
-    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
-    autoDomain: Boolean(req.body?.autoDomain),
-    volumes: Array.isArray(req.body?.volumes) ? req.body.volumes : [],
-    env: Array.isArray(req.body?.env) ? req.body.env : [],
-    source: String(req.body?.source || 'manual'),
-  })
+  const repoUrl = typeof req.body?.repoUrl === 'string' ? req.body.repoUrl.trim() : ''
+  const executable = typeof req.body?.executable === 'string' ? req.body.executable.trim() : ''
+  const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
+  if (customDomain && !isValidDomainName(customDomain)) {
+    res.status(400).json({ error: 'Invalid domain name format (e.g. app.example.com)' })
+    return
+  }
+  const hostPort = req.body?.hostPort ? Number(req.body.hostPort) : req.body?.port ? Number(req.body.port) : undefined
+  const envMap = parseEnvMap(req.body?.env)
+
+  try {
+    if (req.body?.runtime === 'binary' || executable) {
+      const proc = await nativeProcesses.deployBinaryProcess({
+        name,
+        executable,
+        args: req.body?.args,
+        workingDir: typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined,
+        port: hostPort,
+        env: envMap,
+        label: typeof req.body?.label === 'string' ? req.body.label : undefined,
+      })
+      const proxyRoute = upsertAppProxyRoute(
+        proc.name,
+        proc.port,
+        customDomain,
+        Boolean(req.body?.autoDomain)
+      )
+      res.json({
+        app: {
+          id: proc.id,
+          name: proc.name,
+          port: proc.port,
+          runtime: 'binary',
+          status: proc.state,
+        },
+        container: serializeNativeProcess(proc),
+        process: serializeNativeProcess(proc),
+        proxyRoute,
+        liveUrl: `/live/${proc.name}/`,
+        logs: proc.logs.slice(-10).map((l) => l.content),
+      })
+      return
+    }
+
+    if (repoUrl) {
+      if (!isValidPublicHttpsGitUrl(repoUrl)) {
+        res.status(400).json({ error: 'Git repository URL must be a valid public https:// URL' })
+        return
+      }
+      const gitRes = await localRuntime.deployFromGit({
+        name,
+        repoUrl,
+        branch: typeof req.body?.branch === 'string' ? req.body.branch : 'main',
+        port: hostPort,
+        env: envMap,
+      })
+      const proxyRoute = upsertAppProxyRoute(
+        gitRes.app.name,
+        gitRes.app.port,
+        customDomain,
+        Boolean(req.body?.autoDomain)
+      )
+      res.json({
+        app: {
+          id: gitRes.app.id,
+          name: gitRes.app.name,
+          port: gitRes.app.port,
+          runtime: gitRes.app.runtime,
+          status: gitRes.app.state,
+        },
+        container: serializeLocalApp(gitRes.app),
+        proxyRoute,
+        liveUrl: `/live/${gitRes.app.name}/`,
+        logs: gitRes.buildLogs,
+      })
+      return
+    }
+
+    const deployed = await localRuntime.deployLocalApp({
+      name,
+      runtime: req.body?.runtime,
+      runtimeHint: String(req.body?.runtimeHint || req.body?.image || req.body?.runtime || 'static'),
+      hostPort,
+      env: envMap,
+      customHtml: typeof req.body?.customHtml === 'string' ? req.body.customHtml : undefined,
+      imageLabel: typeof req.body?.image === 'string' ? req.body.image : undefined,
+    })
+
+    const proxyRoute = upsertAppProxyRoute(
+      deployed.name,
+      deployed.port,
+      customDomain,
+      Boolean(req.body?.autoDomain)
+    )
+
+    res.json({
+      app: {
+        id: deployed.id,
+        name: deployed.name,
+        port: deployed.port,
+        runtime: deployed.runtime,
+        status: deployed.state,
+      },
+      container: serializeLocalApp(deployed),
+      proxyRoute,
+      liveUrl: `/live/${deployed.name}/`,
+      logs: deployed.logs.slice(-10).map((l) => l.content),
+    })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Deployment failed' })
+  }
+}
+
+api.post('/deploy', handleDeployLocalRequest)
+
+// ==================== NATIVE PROCESS MANAGEMENT (BINARY COMMANDS) ====================
+
+api.get('/processes', (_req: Request, res: Response) => {
+  res.json(nativeProcesses.listProcesses().map(serializeNativeProcess))
+})
+
+api.post('/processes', async (req: Request, res: Response) => {
+  const name = String(req.body?.name || '').trim()
+  const executable = String(req.body?.executable || '').trim()
+  if (!name) {
+    res.status(400).json({ error: 'Process name is required' })
+    return
+  }
+  if (!executable) {
+    res.status(400).json({ error: 'Binary executable command is required (e.g. node, python3)' })
+    return
+  }
+  const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
+  if (customDomain && !isValidDomainName(customDomain)) {
+    res.status(400).json({ error: 'Invalid domain name format' })
+    return
+  }
+  try {
+    const proc = await nativeProcesses.deployBinaryProcess({
+      name,
+      executable,
+      args: req.body?.args,
+      workingDir: typeof req.body?.workingDir === 'string' ? req.body.workingDir : undefined,
+      port: req.body?.port ? Number(req.body.port) : undefined,
+      env: parseEnvMap(req.body?.env),
+      label: typeof req.body?.label === 'string' ? req.body.label : undefined,
+    })
+    const proxyRoute = upsertAppProxyRoute(
+      proc.name,
+      proc.port,
+      customDomain,
+      Boolean(req.body?.autoDomain)
+    )
+    res.json({
+      process: serializeNativeProcess(proc),
+      proxyRoute,
+      liveUrl: `/live/${proc.name}/`,
+      logs: proc.logs.slice(-15).map((l) => l.content),
+    })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to spawn native process' })
+  }
+})
+
+api.post('/processes/:id/start', async (req: Request, res: Response) => {
+  try {
+    const proc = await nativeProcesses.startProcess(String(req.params.id))
+    if (!proc) {
+      res.status(404).json({ error: 'process not found' })
+      return
+    }
+    res.json({ status: 'started', process: serializeNativeProcess(proc) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to start process' })
+  }
+})
+
+api.post('/processes/:id/stop', async (req: Request, res: Response) => {
+  const proc = await nativeProcesses.stopProcess(String(req.params.id))
+  if (!proc) {
+    res.status(404).json({ error: 'process not found' })
+    return
+  }
+  res.json({ status: 'stopped', process: serializeNativeProcess(proc) })
+})
+
+api.post('/processes/:id/restart', async (req: Request, res: Response) => {
+  try {
+    const proc = await nativeProcesses.restartProcess(String(req.params.id))
+    if (!proc) {
+      res.status(404).json({ error: 'process not found' })
+      return
+    }
+    res.json({ status: 'restarted', process: serializeNativeProcess(proc) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to restart process' })
+  }
+})
+
+api.get('/processes/:id/logs', (req: Request, res: Response) => {
+  const lines = nativeProcesses.getLogs(String(req.params.id), 200)
+  res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
+})
+
+api.post('/processes/:id/probe', async (req: Request, res: Response) => {
+  const result = await nativeProcesses.probeProcess(String(req.params.id))
   res.json(result)
 })
 
-// ==================== CONTAINERS & IMAGES ====================
-
-api.get('/containers', (req: Request, res: Response) => {
-  const showAll = req.query.all === 'true'
-  const list = showAll ? store.containers : store.containers.filter((c) => c.state === 'running')
-  res.json(list)
-})
-
-api.post('/containers/prune', (_req: Request, res: Response) => {
-  const stopped = store.containers.filter((c) => c.state !== 'running' && c.state !== 'paused')
-  store.containers = store.containers.filter((c) => c.state === 'running' || c.state === 'paused')
-  const deletedCount = stopped.length
-  const spaceReclaimedBytes = deletedCount * 42 * 1024 * 1024
+api.get('/native-processes', (req: Request, res: Response) => {
+  const runningOnly = req.query.running !== 'false'
+  const sourceFilter = String(req.query.source || 'all')
+  const all = listAllSerializedWorkload()
+  const filtered = all.filter((item) => {
+    if (runningOnly && item.state !== 'running') return false
+    if (sourceFilter !== 'all' && item.source !== sourceFilter) return false
+    return true
+  })
+  const running = all.filter((item) => item.state === 'running')
+  const totalCpuPercent = Number(
+    running.reduce((sum, p) => sum + (Number(p.cpuPercent) || 0), 0).toFixed(1)
+  )
+  const totalMemoryMb = Number(
+    running.reduce((sum, p) => sum + (Number(p.memoryMb) || 0), 0).toFixed(1)
+  )
+  const hostTotalMb = Math.round(os.totalmem() / (1024 * 1024))
+  const totalMemoryPercent = hostTotalMb > 0 ? Number(((totalMemoryMb / hostTotalMb) * 100).toFixed(2)) : 0
   res.json({
-    containers_deleted: deletedCount,
-    deleted_names: stopped.map((c) => c.name),
-    space_reclaimed_bytes: spaceReclaimedBytes,
-    remaining: store.containers.length,
+    processes: filtered,
+    summary: {
+      totalRunning: running.length,
+      totalManaged: all.length,
+      customBinaries: nativeProcesses.listProcesses().length,
+      managedApps: localRuntime.listApps().length,
+      totalCpuPercent,
+      totalMemoryMb,
+      totalMemoryPercent,
+    },
+    host: {
+      platform: os.platform(),
+      arch: os.arch(),
+      cpuCores: os.cpus().length || 1,
+      totalMemoryMb: hostTotalMb,
+      load1: Number((os.loadavg()[0] || 0).toFixed(2)),
+    },
+    timestamp: Date.now(),
   })
 })
 
-api.post('/containers/:id/start', (req: Request, res: Response) => {
-  const c = store.containers.find((item) => item.id === req.params.id)
-  if (!c) {
-    res.status(404).json({ error: 'container not found' })
+api.delete('/processes/:id', async (req: Request, res: Response) => {
+  const proc = nativeProcesses.processes.get(String(req.params.id))
+  if (!proc) {
+    res.status(404).json({ error: 'process not found' })
     return
   }
-  c.state = 'running'
-  c.status = 'Up just now'
-  res.json({ status: 'started' })
-})
-
-api.post('/containers/:id/stop', (req: Request, res: Response) => {
-  const c = store.containers.find((item) => item.id === req.params.id)
-  if (!c) {
-    res.status(404).json({ error: 'container not found' })
-    return
-  }
-  c.state = 'exited'
-  c.status = 'Exited (0) just now'
-  res.json({ status: 'stopped' })
-})
-
-api.post('/containers/:id/pause', (req: Request, res: Response) => {
-  const c = store.containers.find((item) => item.id === req.params.id)
-  if (!c) {
-    res.status(404).json({ error: 'container not found' })
-    return
-  }
-  c.state = 'paused'
-  c.status = 'Paused'
-  res.json({ status: 'paused' })
-})
-
-api.post('/containers/:id/restart', (req: Request, res: Response) => {
-  const c = store.containers.find((item) => item.id === req.params.id)
-  if (!c) {
-    res.status(404).json({ error: 'container not found' })
-    return
-  }
-  c.state = 'running'
-  c.status = 'Up just now'
-  res.json({ status: 'restarted' })
-})
-
-api.delete('/containers/:id/delete', (req: Request, res: Response) => {
-  const idx = store.containers.findIndex((item) => item.id === req.params.id)
-  if (idx === -1) {
-    res.status(404).json({ error: 'container not found' })
-    return
-  }
-  store.containers.splice(idx, 1)
+  const oldPort = proc.port
+  await nativeProcesses.deleteProcess(proc.id)
+  store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json({ status: 'deleted' })
+})
+
+// ==================== RUNNING LOCAL APPS & PROCESSES ====================
+
+api.get('/containers', (req: Request, res: Response) => {
+  const showAll = req.query.all === 'true'
+  const all = listAllSerializedWorkload()
+  const filtered = showAll ? all : all.filter((a) => a.state === 'running')
+  res.json(filtered)
+})
+
+api.post('/containers/prune', async (_req: Request, res: Response) => {
+  const stoppedApps = localRuntime.listApps().filter((a) => a.state !== 'running')
+  const stoppedBins = nativeProcesses.listProcesses().filter((p) => p.state !== 'running')
+  const deletedNames: string[] = []
+  for (const item of stoppedApps) {
+    await localRuntime.deleteApp(item.id)
+    deletedNames.push(item.name)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${item.port}`)
+  }
+  for (const item of stoppedBins) {
+    await nativeProcesses.deleteProcess(item.id)
+    deletedNames.push(item.name)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${item.port}`)
+  }
+  res.json({
+    containers_deleted: deletedNames.length,
+    deleted_names: deletedNames,
+    space_reclaimed_bytes: 0,
+    remaining: listAllSerializedWorkload().length,
+  })
+})
+
+api.post('/containers/:id/start', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const appItem = await localRuntime.startApp(id)
+  if (appItem) {
+    res.json({ status: 'started', app: serializeLocalApp(appItem) })
+    return
+  }
+  try {
+    const procItem = await nativeProcesses.startProcess(id)
+    if (procItem) {
+      res.json({ status: 'started', app: serializeNativeProcess(procItem) })
+      return
+    }
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to start process' })
+    return
+  }
+  res.status(404).json({ error: 'app not found' })
+})
+
+api.post('/containers/:id/stop', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const appItem = await localRuntime.stopApp(id)
+  if (appItem) {
+    res.json({ status: 'stopped', app: serializeLocalApp(appItem) })
+    return
+  }
+  const procItem = await nativeProcesses.stopProcess(id)
+  if (procItem) {
+    res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
+    return
+  }
+  res.status(404).json({ error: 'app not found' })
+})
+
+api.post('/containers/:id/pause', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const appItem = await localRuntime.stopApp(id)
+  if (appItem) {
+    res.json({ status: 'stopped', app: serializeLocalApp(appItem) })
+    return
+  }
+  const procItem = await nativeProcesses.stopProcess(id)
+  if (procItem) {
+    res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
+    return
+  }
+  res.status(404).json({ error: 'app not found' })
+})
+
+api.post('/containers/:id/restart', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const appItem = await localRuntime.restartApp(id)
+  if (appItem) {
+    res.json({ status: 'restarted', app: serializeLocalApp(appItem) })
+    return
+  }
+  try {
+    const procItem = await nativeProcesses.restartProcess(id)
+    if (procItem) {
+      res.json({ status: 'restarted', app: serializeNativeProcess(procItem) })
+      return
+    }
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to restart process' })
+    return
+  }
+  res.status(404).json({ error: 'app not found' })
+})
+
+api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const existing = localRuntime.apps.get(id)
+  if (existing) {
+    const oldPort = existing.port
+    await localRuntime.deleteApp(existing.id)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
+    proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    res.json({ status: 'deleted' })
+    return
+  }
+  const existingBin = nativeProcesses.processes.get(id)
+  if (existingBin) {
+    const oldPort = existingBin.port
+    await nativeProcesses.deleteProcess(existingBin.id)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
+    proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    res.json({ status: 'deleted' })
+    return
+  }
+  res.status(404).json({ error: 'app not found' })
 })
 
 api.get('/containers/:id/logs', (req: Request, res: Response) => {
   const id = String(req.params.id)
-  const lines = store.getContainerLogs(id, 100)
+  const appLines = localRuntime.getAppLogs(id, 150)
+  const lines = appLines.length > 0 ? appLines : nativeProcesses.getLogs(id, 150)
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
 
-api.post('/containers', (req: Request, res: Response) => {
-  const name = String(req.body?.name || '').trim()
-  const image = String(req.body?.image || '').trim()
-  if (!name || !image) {
-    res.status(400).json({ error: 'name and image are required' })
+api.post('/containers', handleDeployLocalRequest)
+
+api.post('/apps/:id/domain', (req: Request, res: Response) => {
+  const key = String(req.params.id)
+  const targetApp = localRuntime.apps.get(key) || localRuntime.findByName(key)
+  const targetBin = nativeProcesses.getProcess(key)
+  const target = targetApp || targetBin
+  if (!target) {
+    res.status(404).json({ error: 'app not found' })
     return
   }
-  const result = store.deployService({
-    name,
-    image,
-    hostPort: req.body?.hostPort ? Number(req.body.hostPort) : undefined,
-    containerPort: req.body?.containerPort ? Number(req.body.containerPort) : undefined,
-    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
-    autoDomain: Boolean(req.body?.autoDomain),
-    env: Array.isArray(req.body?.env) ? req.body.env : [],
-    source: 'containers',
+  const domain = String(req.body?.domain || '').trim().toLowerCase()
+  if (!isValidDomainName(domain)) {
+    res.status(400).json({ error: 'Please enter a valid domain name (e.g. app.example.com)' })
+    return
+  }
+  const route = upsertAppProxyRoute(target.name, target.port, domain, false)
+  res.json({
+    route,
+    app: targetApp ? serializeLocalApp(targetApp) : serializeNativeProcess(targetBin!),
   })
-  res.json(result)
 })
 
 function getImageUsage(img: (typeof store.images)[number]) {
@@ -549,29 +1108,156 @@ api.delete('/apps/:id', (req: Request, res: Response) => {
   res.json({ status: 'deleted' })
 })
 
-// ==================== REVERSE PROXY ====================
+// ==================== REVERSE PROXY & CUSTOM DOMAINS ====================
+
+api.get('/proxy/config', (_req: Request, res: Response) => {
+  const rawJson = proxyConfig.readRawJson(store.proxyRoutes, store.settings)
+  const loaded = proxyConfig.loadFromDisk()
+  res.json({
+    filePath: proxyConfig.filePath,
+    relativePath: path.relative(process.cwd(), proxyConfig.filePath) || 'data/reverse-proxy.json',
+    updatedAt: loaded?.updatedAt || new Date().toISOString(),
+    settings: loaded?.settings || store.settings,
+    routes: loaded?.routes || store.proxyRoutes,
+    rawJson,
+  })
+})
+
+api.put('/proxy/config', (req: Request, res: Response) => {
+  const incomingRoutes = req.body?.routes
+  if (Array.isArray(incomingRoutes)) {
+    const validated: typeof store.proxyRoutes = []
+    for (const item of incomingRoutes) {
+      const domain = String(item?.domain || '').trim().toLowerCase()
+      if (!domain || !isValidDomainName(domain)) {
+        res.status(400).json({ error: `Invalid domain name: "${item?.domain || ''}"` })
+        return
+      }
+      const rawHost = String(item?.targetHost || 'localhost').trim().toLowerCase()
+      const safeHost = rawHost === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+      let target = String(item?.target || '').trim()
+      if (target && !/^https?:\/\//i.test(target)) {
+        target = `http://${target}`
+      }
+      if (!target && item?.localPort !== undefined) {
+        target = `http://${safeHost}:${Number(item.localPort)}`
+      }
+      const check = validateLocalProxyTarget(target)
+      if (!check.ok) {
+        res.status(400).json({ error: `${domain}: ${check.error}` })
+        return
+      }
+      validated.push({
+        id: String(item?.id || store.newId('proxy')),
+        domain,
+        target: `http://${check.url.hostname.toLowerCase()}:${check.url.port}`,
+        port: Boolean(item?.ssl) ? 443 : 80,
+        ssl: Boolean(item?.ssl),
+        enabled: item?.enabled !== undefined ? Boolean(item.enabled) : true,
+      })
+    }
+    store.proxyRoutes = validated
+  }
+  const s = req.body?.settings
+  if (s && typeof s === 'object') {
+    if (typeof s.serverDomain === 'string') store.settings.serverDomain = s.serverDomain.trim()
+    if (typeof s.wildcardDomain === 'string') store.settings.wildcardDomain = s.wildcardDomain.trim()
+    if (typeof s.letsEncryptEmail === 'string') store.settings.letsEncryptEmail = s.letsEncryptEmail.trim()
+    if (typeof s.autoSsl === 'boolean') store.settings.autoSsl = s.autoSsl
+    if (typeof s.forceHttps === 'boolean') store.settings.forceHttps = s.forceHttps
+  }
+  const saved = proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  res.json({
+    filePath: proxyConfig.filePath,
+    relativePath: path.relative(process.cwd(), proxyConfig.filePath) || 'data/reverse-proxy.json',
+    updatedAt: saved.updatedAt,
+    settings: saved.settings,
+    routes: saved.routes,
+    rawJson: JSON.stringify(saved, null, 2),
+  })
+})
 
 api.get('/proxy', (_req: Request, res: Response) => {
-  res.json(store.proxyRoutes)
+  const allWorkloads = listAllSerializedWorkload()
+  const enriched = store.proxyRoutes.map((route) => {
+    const check = validateLocalProxyTarget(route.target)
+    const targetPort = check.ok ? Number(check.url.port) : null
+    const targetHost = check.ok ? check.url.hostname.toLowerCase() : '127.0.0.1'
+    const linkedApp = targetPort ? allWorkloads.find((a) => a.port === targetPort) : undefined
+    return {
+      ...route,
+      targetHost,
+      localPort: targetPort,
+      appName: linkedApp?.name || null,
+      appState: linkedApp?.state || null,
+      liveUrl: linkedApp ? `/live/${linkedApp.name}/` : null,
+    }
+  })
+  res.json(enriched)
 })
 
 api.post('/proxy', (req: Request, res: Response) => {
-  const domain = String(req.body?.domain || '').trim()
-  const target = String(req.body?.target || '').trim()
-  if (!domain || !target) {
-    res.status(400).json({ error: 'domain and target are required' })
+  const domain = String(req.body?.domain || '').trim().toLowerCase()
+  const appName = String(req.body?.appName || '').trim()
+  const rawHost = String(req.body?.targetHost || 'localhost').trim().toLowerCase()
+  const safeHost = rawHost === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+  const localPort = req.body?.localPort !== undefined && req.body?.localPort !== '' ? Number(req.body.localPort) : null
+  let target = String(req.body?.target || '').trim()
+  if (target && !/^https?:\/\//i.test(target)) {
+    target = `http://${target}`
+  }
+
+  if (!domain || !isValidDomainName(domain)) {
+    res.status(400).json({ error: 'Please provide a valid domain name (e.g. myapp.local)' })
     return
   }
+
+  if (!target && localPort !== null) {
+    if (!Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) {
+      res.status(400).json({ error: 'Local port must be an integer between 1024 and 65535' })
+      return
+    }
+    target = `http://${safeHost}:${localPort}`
+  }
+
+  if (!target && appName) {
+    const foundApp = localRuntime.findByName(appName) || nativeProcesses.findByName(appName)
+    if (!foundApp) {
+      res.status(404).json({ error: `App "${appName}" was not found` })
+      return
+    }
+    target = `http://${safeHost}:${foundApp.port}`
+  }
+
+  const check = validateLocalProxyTarget(target)
+  if (!check.ok) {
+    res.status(400).json({ error: check.error })
+    return
+  }
+  const normalizedTarget = `http://${check.url.hostname.toLowerCase()}:${check.url.port}`
+
+  const existing = store.proxyRoutes.find((r) => r.domain.toLowerCase() === domain)
+  if (existing) {
+    existing.target = normalizedTarget
+    existing.port = Number(req.body?.port) || 80
+    existing.ssl = Boolean(req.body?.ssl)
+    existing.enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : true
+    const saved = proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    res.json({ ...existing, savedToJson: true, configUpdatedAt: saved.updatedAt })
+    return
+  }
+
   const route = {
     id: store.newId('proxy'),
     domain,
-    target,
+    target: normalizedTarget,
     port: Number(req.body?.port) || 80,
     ssl: Boolean(req.body?.ssl),
-    enabled: true,
+    enabled: req.body?.enabled !== undefined ? Boolean(req.body.enabled) : true,
   }
   store.proxyRoutes.push(route)
-  res.json(route)
+  const saved = proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  res.json({ ...route, savedToJson: true, configUpdatedAt: saved.updatedAt })
 })
 
 api.get('/proxy/:id', (req: Request, res: Response) => {
@@ -589,7 +1275,50 @@ api.put('/proxy/:id', (req: Request, res: Response) => {
     res.status(404).json({ error: 'route not found' })
     return
   }
-  store.proxyRoutes[idx] = { ...store.proxyRoutes[idx], ...req.body, id: String(req.params.id) }
+  const current = store.proxyRoutes[idx]
+  let nextDomain = current.domain
+  let nextTarget = current.target
+
+  if (typeof req.body?.domain === 'string') {
+    const d = req.body.domain.trim().toLowerCase()
+    if (!isValidDomainName(d)) {
+      res.status(400).json({ error: 'Invalid domain name format' })
+      return
+    }
+    nextDomain = d
+  }
+
+  const rawHost = String(req.body?.targetHost || 'localhost').trim().toLowerCase()
+  const safeHost = rawHost === '127.0.0.1' ? '127.0.0.1' : 'localhost'
+
+  if (req.body?.localPort !== undefined && req.body?.localPort !== '') {
+    const lp = Number(req.body.localPort)
+    if (!Number.isInteger(lp) || lp < 1024 || lp > 65535) {
+      res.status(400).json({ error: 'Local port must be between 1024 and 65535' })
+      return
+    }
+    nextTarget = `http://${safeHost}:${lp}`
+  } else if (typeof req.body?.target === 'string' && req.body.target.trim()) {
+    let candidate = req.body.target.trim()
+    if (!/^https?:\/\//i.test(candidate)) candidate = `http://${candidate}`
+    const check = validateLocalProxyTarget(candidate)
+    if (!check.ok) {
+      res.status(400).json({ error: check.error })
+      return
+    }
+    nextTarget = `http://${check.url.hostname.toLowerCase()}:${check.url.port}`
+  }
+
+  store.proxyRoutes[idx] = {
+    ...current,
+    domain: nextDomain,
+    target: nextTarget,
+    ssl: req.body?.ssl !== undefined ? Boolean(req.body.ssl) : current.ssl,
+    enabled: req.body?.enabled !== undefined ? Boolean(req.body.enabled) : current.enabled,
+    port: req.body?.port !== undefined ? Number(req.body.port) || 80 : current.port,
+    id: String(req.params.id),
+  }
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json(store.proxyRoutes[idx])
 })
 
@@ -600,7 +1329,28 @@ api.delete('/proxy/:id', (req: Request, res: Response) => {
     return
   }
   store.proxyRoutes.splice(idx, 1)
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json({ status: 'deleted' })
+})
+
+api.post('/proxy/:id/test', async (req: Request, res: Response) => {
+  const route = store.proxyRoutes.find((r) => r.id === req.params.id)
+  if (!route) {
+    res.status(404).json({ error: 'route not found' })
+    return
+  }
+  const check = validateLocalProxyTarget(route.target)
+  if (!check.ok) {
+    res.status(400).json({ ok: false, error: check.error })
+    return
+  }
+  const port = Number(check.url.port || (check.url.protocol === 'https:' ? 443 : 80))
+  const probe = await probeLocalHttp(port, '/')
+  res.json({
+    ...probe,
+    domain: route.domain,
+    target: route.target,
+  })
 })
 
 api.post('/proxy/:id/enable', (req: Request, res: Response) => {
@@ -610,6 +1360,7 @@ api.post('/proxy/:id/enable', (req: Request, res: Response) => {
     return
   }
   route.enabled = true
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json({ status: 'enabled' })
 })
 
@@ -620,6 +1371,7 @@ api.post('/proxy/:id/disable', (req: Request, res: Response) => {
     return
   }
   route.enabled = false
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
   res.json({ status: 'disabled' })
 })
 
@@ -920,74 +1672,107 @@ api.get('/templates/:id', (req: Request, res: Response) => {
   res.json(tmpl)
 })
 
-api.post('/templates/:id/deploy', (req: Request, res: Response) => {
+api.post('/templates/:id/deploy', async (req: Request, res: Response) => {
   const tmpl = SERVICE_TEMPLATES.find((t) => t.id === req.params.id)
   if (!tmpl) {
     res.status(404).json({ error: 'template not found' })
     return
   }
   const firstPort = tmpl.ports[0] || ''
-  const [defaultHostStr, defaultContainerStr] = firstPort.split(':')
-  const requestedPort = req.body?.hostPort ? Number(req.body.hostPort) : Number(defaultHostStr) || 8080
-  const containerPort = Number(defaultContainerStr) || requestedPort
+  const [defaultHostStr] = firstPort.split(':')
+  const requestedPort = req.body?.hostPort ? Number(req.body.hostPort) : Number(defaultHostStr) || undefined
   const customName = String(req.body?.name || tmpl.id).trim() || tmpl.id
-  const envList = Array.isArray(req.body?.env) ? req.body.env : tmpl.env_vars
+  const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
+  if (customDomain && !isValidDomainName(customDomain)) {
+    res.status(400).json({ error: 'Invalid domain name format' })
+    return
+  }
 
-  const result = store.deployService({
-    name: customName,
-    image: tmpl.image,
-    hostPort: requestedPort,
-    containerPort,
-    domain: typeof req.body?.domain === 'string' ? req.body.domain : '',
-    autoDomain: Boolean(req.body?.autoDomain),
-    volumes: tmpl.volumes,
-    env: envList,
-    source: `template:${tmpl.id}`,
-  })
-  res.json({ template: tmpl.name, ...result })
+  try {
+    const deployed = await localRuntime.deployLocalApp({
+      name: customName,
+      runtimeHint: `${tmpl.id} ${tmpl.image}`,
+      hostPort: requestedPort,
+      env: parseEnvMap(Array.isArray(req.body?.env) ? req.body.env : tmpl.env_vars),
+      imageLabel: tmpl.name,
+    })
+    const proxyRoute = upsertAppProxyRoute(
+      deployed.name,
+      deployed.port,
+      customDomain,
+      Boolean(req.body?.autoDomain)
+    )
+    res.json({
+      template: tmpl.name,
+      app: {
+        id: deployed.id,
+        name: deployed.name,
+        port: deployed.port,
+        runtime: deployed.runtime,
+        status: deployed.state,
+      },
+      container: serializeLocalApp(deployed),
+      proxyRoute,
+      liveUrl: `/live/${deployed.name}/`,
+      logs: deployed.logs.slice(-10).map((l) => l.content),
+    })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Template launch failed' })
+  }
 })
 
 // ==================== GIT DEPLOY ====================
 
-function executeGitDeployment(repo: (typeof store.gitRepos)[number]) {
-  const commit = crypto.randomBytes(4).toString('hex').slice(0, 7)
+async function executeGitDeployment(repo: (typeof store.gitRepos)[number]) {
   const timestamp = new Date().toISOString()
-  const deployResult = store.deployService({
-    name: repo.name,
-    image: `${repo.name}:${commit}`,
-    hostPort: repo.port || undefined,
-    containerPort: repo.port || 3000,
-    domain: repo.domain || '',
-    autoDomain: !repo.domain,
-    source: `git:${repo.url}`,
-  })
-  repo.status = 'success'
-  repo.last_deploy = timestamp
-  repo.container_id = deployResult.container.id
-  repo.port = deployResult.app.port
-  if (!repo.domain && deployResult.proxyRoute) {
-    repo.domain = deployResult.proxyRoute.domain
+  try {
+    const result = await localRuntime.deployFromGit({
+      name: repo.name,
+      repoUrl: repo.url,
+      branch: repo.branch || 'main',
+      port: repo.port || undefined,
+      env: parseEnvMap(null),
+    })
+    repo.status = 'success'
+    repo.last_deploy = timestamp
+    repo.container_id = result.app.id
+    repo.port = result.app.port
+    const proxyRoute = upsertAppProxyRoute(
+      result.app.name,
+      result.app.port,
+      repo.domain || '',
+      !repo.domain
+    )
+    if (!repo.domain && proxyRoute) {
+      repo.domain = proxyRoute.domain
+    }
+    const log = {
+      timestamp,
+      commit: result.commit,
+      containerId: result.app.id,
+      port: result.app.port,
+      domain: proxyRoute?.domain || repo.domain || '',
+      liveUrl: `/live/${result.app.name}/`,
+      output: result.buildLogs.join('\n'),
+    }
+    const list = store.gitHistory.get(repo.id) || []
+    list.unshift(log)
+    store.gitHistory.set(repo.id, list)
+    return log
+  } catch (err) {
+    repo.status = 'failed'
+    repo.last_deploy = timestamp
+    const message = (err as Error).message || 'Git deploy failed'
+    const log = {
+      timestamp,
+      error: message,
+      output: `Error: ${message}`,
+    }
+    const list = store.gitHistory.get(repo.id) || []
+    list.unshift(log)
+    store.gitHistory.set(repo.id, list)
+    throw err
   }
-
-  const log = {
-    timestamp,
-    commit,
-    containerId: deployResult.container.id,
-    port: deployResult.app.port,
-    domain: deployResult.proxyRoute?.domain || repo.domain || '',
-    output: [
-      `> Fetching branch "${repo.branch}" from ${repo.url}`,
-      `> Checked out commit ${commit}`,
-      `> Injected ${store.envVars.length} global environment variable(s)`,
-      `> Running build & deploy command: ${repo.deploy_cmd || 'docker compose up -d'}`,
-      ...deployResult.logs,
-      `> Deployment succeeded!`,
-    ].join('\n'),
-  }
-  const list = store.gitHistory.get(repo.id) || []
-  list.unshift(log)
-  store.gitHistory.set(repo.id, list)
-  return log
 }
 
 api.get('/git/repos', (_req: Request, res: Response) => {
@@ -1001,13 +1786,22 @@ api.post('/git/repos', (req: Request, res: Response) => {
     res.status(400).json({ error: 'name and url are required' })
     return
   }
+  if (!isValidPublicHttpsGitUrl(url)) {
+    res.status(400).json({ error: 'Repository URL must be a valid public https:// Git URL' })
+    return
+  }
+  const domain = String(req.body?.domain || '').trim().toLowerCase()
+  if (domain && !isValidDomainName(domain)) {
+    res.status(400).json({ error: 'Invalid domain name format' })
+    return
+  }
   const repo = {
     id: store.newId('repo'),
     name,
     url,
     branch: String(req.body?.branch || 'main'),
-    deploy_cmd: String(req.body?.deploy_cmd || 'docker compose up -d'),
-    domain: String(req.body?.domain || '').trim(),
+    deploy_cmd: String(req.body?.deploy_cmd || 'Auto-detect (Node.js / Python / Static)'),
+    domain,
     port: req.body?.port ? Number(req.body.port) : undefined,
     status: 'idle' as const,
   }
@@ -1022,11 +1816,24 @@ api.put('/git/repos/:id', (req: Request, res: Response) => {
     res.status(404).json({ error: 'repo not found' })
     return
   }
+  if (typeof req.body?.url === 'string' && req.body.url.trim()) {
+    if (!isValidPublicHttpsGitUrl(req.body.url.trim())) {
+      res.status(400).json({ error: 'Repository URL must be a valid public https:// Git URL' })
+      return
+    }
+    repo.url = req.body.url.trim()
+  }
   if (typeof req.body?.name === 'string' && req.body.name.trim()) repo.name = req.body.name.trim()
-  if (typeof req.body?.url === 'string' && req.body.url.trim()) repo.url = req.body.url.trim()
   if (typeof req.body?.branch === 'string') repo.branch = req.body.branch.trim() || 'main'
   if (typeof req.body?.deploy_cmd === 'string') repo.deploy_cmd = req.body.deploy_cmd
-  if (typeof req.body?.domain === 'string') repo.domain = req.body.domain.trim()
+  if (typeof req.body?.domain === 'string') {
+    const d = req.body.domain.trim().toLowerCase()
+    if (d && !isValidDomainName(d)) {
+      res.status(400).json({ error: 'Invalid domain name format' })
+      return
+    }
+    repo.domain = d
+  }
   if (req.body?.port !== undefined) repo.port = Number(req.body.port) || undefined
   res.json(repo)
 })
@@ -1042,21 +1849,25 @@ api.delete('/git/repos/:id', (req: Request, res: Response) => {
   res.json({ status: 'deleted' })
 })
 
-api.post('/git/repos/:id/deploy', (req: Request, res: Response) => {
+api.post('/git/repos/:id/deploy', async (req: Request, res: Response) => {
   const repo = store.gitRepos.find((r) => r.id === req.params.id)
   if (!repo) {
     res.status(404).json({ error: 'repo not found' })
     return
   }
-  const log = executeGitDeployment(repo)
-  res.json(log)
+  try {
+    const log = await executeGitDeployment(repo)
+    res.json(log)
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Git deploy failed' })
+  }
 })
 
 api.get('/git/repos/:id/history', (req: Request, res: Response) => {
   res.json(store.gitHistory.get(String(req.params.id)) || [])
 })
 
-api.post('/git/webhook', (req: Request, res: Response) => {
+api.post('/git/webhook', async (req: Request, res: Response) => {
   const repoId = String(req.body?.repo_id || req.query?.repo_id || '')
   const target = (repoId ? store.gitRepos.find((r) => r.id === repoId) : store.gitRepos[0])
   if (!target) {
@@ -1067,8 +1878,12 @@ api.post('/git/webhook', (req: Request, res: Response) => {
     res.json({ repo_id: target.id, status: 'ignored', reason: 'autoDeployWebhook disabled in settings' })
     return
   }
-  const log = executeGitDeployment(target)
-  res.json({ repo_id: target.id, status: 'deployed', ...log })
+  try {
+    const log = await executeGitDeployment(target)
+    res.json({ repo_id: target.id, status: 'deployed', ...log })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Webhook deploy failed' })
+  }
 })
 
 // ==================== WEB TERMINAL ====================
@@ -1092,8 +1907,9 @@ api.delete('/terminal/sessions/:id', (req: Request, res: Response) => {
 // ==================== MONITORING ====================
 
 api.get('/monitoring/current', (_req: Request, res: Response) => {
+  const runningApps = getAllRunningForMetrics()
   const latest = store.monitoringHistory[store.monitoringHistory.length - 1]
-  res.json(latest || store.collectMonitoringSample())
+  res.json(latest || store.collectMonitoringSample(Date.now(), runningApps))
 })
 
 api.get('/monitoring/history', (_req: Request, res: Response) => {
@@ -1104,11 +1920,11 @@ api.get('/monitoring/history', (_req: Request, res: Response) => {
 
 api.get('/logs/containers', (_req: Request, res: Response) => {
   res.json(
-    store.containers.map((c) => ({
-      id: c.id,
-      name: c.name,
-      image: c.image,
-      status: c.status,
+    listAllSerializedWorkload().map((s) => ({
+      id: s.id,
+      name: s.name,
+      image: s.runtimeLabel,
+      status: s.status,
     }))
   )
 })
@@ -1117,14 +1933,16 @@ api.get('/logs', (req: Request, res: Response) => {
   const containerId = String(req.query.container || '')
   const tail = Number(req.query.tail) || 100
   const filter = String(req.query.filter || '')
-  res.json(store.getContainerLogs(containerId, tail, filter))
+  const appLogs = localRuntime.getAppLogs(containerId, tail, filter)
+  res.json(appLogs.length > 0 ? appLogs : nativeProcesses.getLogs(containerId, tail, filter))
 })
 
 api.post('/logs/search', (req: Request, res: Response) => {
   const containerId = String(req.body?.container || '')
   const query = String(req.body?.query || '')
   const limit = Number(req.body?.limit) || 500
-  res.json(store.getContainerLogs(containerId, limit, query))
+  const appLogs = localRuntime.getAppLogs(containerId, limit, query)
+  res.json(appLogs.length > 0 ? appLogs : nativeProcesses.getLogs(containerId, limit, query))
 })
 
 // ==================== COMPOSE ====================
@@ -1264,37 +2082,34 @@ function syncDiscoveredComposeFiles() {
 
 function serializeComposeProject(p: (typeof store.composeProjects)[number]) {
   const rawDefs = extractComposeServiceDefs(p.config)
-  const hasPrefixedContainers = store.containers.some((c) => c.name.startsWith(`${p.name}-`))
+  const apps = localRuntime.listApps()
+  const hasPrefixedApps = apps.some((a) => a.name.startsWith(`${p.name}-`))
 
   const serviceDefs = rawDefs.map((d) => {
-    let container = store.containers.find((c) => c.name === `${p.name}-${d.name}`)
-    if (!container && !hasPrefixedContainers && p.status === 'running') {
-      container = store.containers.find((c) => c.image === d.image)
-    }
-    const state: 'running' | 'paused' | 'exited' | 'down' = container ? container.state : 'down'
+    const appItem = apps.find((a) => a.name === sanitizeAppName(`${p.name}-${d.name}`))
+    const state: 'running' | 'paused' | 'exited' | 'down' = appItem ? appItem.state : 'down'
     return {
       ...d,
       state,
-      containerName: container?.name || `${p.name}-${d.name}`,
+      containerName: appItem?.name || `${p.name}-${d.name}`,
     }
   })
 
   const totalServices = serviceDefs.length
   const runningServices = serviceDefs.filter((s) => s.state === 'running').length
-  const pausedServices = serviceDefs.filter((s) => s.state === 'paused').length
 
   let healthStatus: 'healthy' | 'degraded' | 'down' = 'down'
   let healthLabel = 'Down'
   if (totalServices > 0 && runningServices === totalServices) {
     healthStatus = 'healthy'
     healthLabel = 'Healthy'
-  } else if (runningServices > 0 || pausedServices > 0) {
+  } else if (runningServices > 0) {
     healthStatus = 'degraded'
     healthLabel = 'Degraded'
   }
 
   let effectiveStatus = p.status
-  if (hasPrefixedContainers) {
+  if (hasPrefixedApps) {
     effectiveStatus = runningServices > 0 ? 'running' : 'stopped'
   }
 
@@ -1381,7 +2196,7 @@ function handleUpdateCompose(req: Request, res: Response) {
 api.put('/compose/:name', handleUpdateCompose)
 api.post('/compose/:name', handleUpdateCompose)
 
-api.delete('/compose/:name', (req: Request, res: Response) => {
+api.delete('/compose/:name', async (req: Request, res: Response) => {
   const name = String(req.params.name)
   const idx = store.composeProjects.findIndex((item) => item.name === name)
   if (idx === -1) {
@@ -1392,71 +2207,73 @@ api.delete('/compose/:name', (req: Request, res: Response) => {
   if (project.filePath && store.files.has(project.filePath)) {
     store.files.delete(project.filePath)
   }
-  store.containers = store.containers.filter((c) => !c.name.startsWith(`${name}-`))
+  const prefix = sanitizeAppName(name) + '-'
+  for (const appItem of localRuntime.listApps()) {
+    if (appItem.name.startsWith(prefix)) {
+      await localRuntime.deleteApp(appItem.id)
+    }
+  }
   store.composeProjects.splice(idx, 1)
   res.json({ status: 'deleted' })
 })
 
-function startComposeProject(p: (typeof store.composeProjects)[number]) {
+async function startComposeProject(p: (typeof store.composeProjects)[number]) {
   const defs = extractComposeServiceDefs(p.config)
   p.services = defs.map((d) => d.name)
-  const deployed = defs.map((d) =>
-    store.deployService({
+  let deployedCount = 0
+  for (const d of defs) {
+    await localRuntime.deployLocalApp({
       name: `${p.name}-${d.name}`,
-      image: d.image,
+      runtimeHint: d.image,
       hostPort: d.hostPort,
-      containerPort: d.containerPort,
-      source: `compose:${p.name}`,
+      env: parseEnvMap(null),
+      imageLabel: d.image,
     })
-  )
+    deployedCount += 1
+  }
   p.status = 'running'
   p.updatedAt = new Date().toISOString()
-  return { ...serializeComposeProject(p), deployedCount: deployed.length }
+  return { ...serializeComposeProject(p), deployedCount }
 }
 
-api.post('/compose/:name/start', (req: Request, res: Response) => {
+api.post('/compose/:name/start', async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  res.json(startComposeProject(p))
+  res.json(await startComposeProject(p))
 })
 
-api.post('/compose/:name/deploy', (req: Request, res: Response) => {
+api.post('/compose/:name/deploy', async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  res.json(startComposeProject(p))
+  res.json(await startComposeProject(p))
 })
 
-api.post('/compose/:name/restart', (req: Request, res: Response) => {
+api.post('/compose/:name/restart', async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  const result = startComposeProject(p)
-  for (const c of store.containers) {
-    if (c.name.startsWith(`${p.name}-`)) {
-      c.status = 'Up just now (restarted)'
-    }
-  }
+  const result = await startComposeProject(p)
   res.json({ ...result, restarted: true })
 })
 
-api.post('/compose/:name/stop', (req: Request, res: Response) => {
+api.post('/compose/:name/stop', async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
     return
   }
-  for (const c of store.containers) {
-    if (c.name.startsWith(`${p.name}-`)) {
-      c.state = 'exited'
-      c.status = 'Exited (0) just now'
+  const prefix = sanitizeAppName(p.name) + '-'
+  for (const appItem of localRuntime.listApps()) {
+    if (appItem.name.startsWith(prefix)) {
+      await localRuntime.stopApp(appItem.id)
     }
   }
   p.status = 'stopped'
@@ -1774,28 +2591,22 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
         nextCwd: cwd,
         output: 'Filesystem      Size  Used Avail Use% Mounted on\r\noverlay         100G   34G   66G  34% /',
       }
+    case 'apps':
     case 'docker': {
-      const sub = args[0]
+      const sub = cmd === 'apps' ? 'ps' : args[0]
       if (sub === 'ps') {
-        const rows = store.containers.map(
-          (c) => `${c.id.slice(0, 12)}   ${c.image.padEnd(28)}   ${c.state.padEnd(9)}   ${c.name}`
+        const rows = listAllSerializedWorkload().map(
+          (a) =>
+            `${a.id.padEnd(14)}   ${a.runtimeLabel.padEnd(24)}   ${a.state.padEnd(8)}   :${a.port}   ${a.name}`
         )
         return {
           nextCwd: cwd,
-          output: `CONTAINER ID   IMAGE                          STATE       NAMES\r\n${rows.join('\r\n')}`,
+          output: rows.length
+            ? `APP ID           RUNTIME                    STATE      PORT    NAME\r\n${rows.join('\r\n')}`
+            : 'No local apps currently installed.',
         }
       }
-      if (sub === 'images') {
-        const rows = store.images.map((i) => {
-          const [repo, tag] = (i.repoTags[0] || '<none>:<none>').split(':')
-          return `${repo.padEnd(28)}   ${(tag || 'latest').padEnd(10)}   ${Math.round(i.size / 1048576)}MB`
-        })
-        return {
-          nextCwd: cwd,
-          output: `REPOSITORY                     TAG          SIZE\r\n${rows.join('\r\n')}`,
-        }
-      }
-      return { nextCwd: cwd, output: 'Usage: docker [ps|images]' }
+      return { nextCwd: cwd, output: 'Usage: apps (or docker ps)' }
     }
     default:
       return { nextCwd: cwd, output: `bash: ${cmd}: command not found (type 'help' for built-ins)` }

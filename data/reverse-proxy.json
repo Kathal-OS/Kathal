@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-21T21:55:51.215Z",
+  "settings": {
+    "serverDomain": "kathal.local",
+    "wildcardDomain": "apps.kathal.local",
+    "letsEncryptEmail": "admin@kathal.local",
+    "autoSsl": true,
+    "forceHttps": true
+  },
+  "routes": []
+}

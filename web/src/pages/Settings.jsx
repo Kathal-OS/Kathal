@@ -14,8 +14,11 @@ import {
   Check,
   RotateCw,
   AlertTriangle,
+  Laptop,
 } from 'lucide-react'
 import { useApi, apiFetch, apiPost, apiPut } from '../hooks/useApi'
+import PWAInstallButton from '../components/PWAInstallButton'
+import { usePWAInstall } from '../hooks/usePWAInstall'
 
 const QUICK_DEPLOY_CATALOG = [
   { id: 'nginx', name: 'Nginx', icon: Globe, desc: 'Web server', image: 'nginx:alpine', port: 80 },
@@ -30,6 +33,7 @@ const QUICK_DEPLOY_CATALOG = [
 
 export default function Settings() {
   const { data: status } = useApi('/status')
+  const { isInstalled, platform } = usePWAInstall()
   const [settings, setSettings] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saveBanner, setSaveBanner] = useState(null)
@@ -357,11 +361,50 @@ export default function Settings() {
           <div>
             <p className="text-xs text-slate-400 mb-1">Engine Status</p>
             <p className="font-medium text-sm">
-              {status?.dockerAvailable ? (
-                <span className="text-green-400">Connected (v{status?.dockerVersion || '?'})</span>
-              ) : (
-                <span className="text-amber-400">System Mode</span>
-              )}
+              <span className="text-green-400">Local Native Runtime</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop App Support */}
+      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-kathal-600/15 border border-kathal-500/30 flex items-center justify-center text-kathal-400 shrink-0">
+              <Laptop className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-100">Desktop App Support</h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Run KATHAL as a standalone desktop window via PWA installation or the Electron launcher.
+              </p>
+            </div>
+          </div>
+          <PWAInstallButton />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80">
+          <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+            <p className="text-xs text-slate-400">Display Mode</p>
+            <p className="text-sm font-medium text-slate-100 mt-1">
+              {isInstalled ? 'Standalone Window' : 'Browser Tab'}
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+            <p className="text-xs text-slate-400">Detected OS</p>
+            <p className="text-sm font-medium text-slate-100 capitalize mt-1">{platform}</p>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+            <p className="text-xs text-slate-400">Web App Manifest</p>
+            <p className="text-xs font-mono text-green-400 mt-1.5">
+              {status?.desktopSupport?.pwaManifest || '/manifest.webmanifest'}
+            </p>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
+            <p className="text-xs text-slate-400">Electron Wrapper</p>
+            <p className="text-xs font-mono text-slate-200 mt-1.5">
+              {status?.desktopSupport?.desktopCommand || 'npm run desktop'}
             </p>
           </div>
         </div>

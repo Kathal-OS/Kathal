@@ -169,154 +169,22 @@ export interface PlatformSettings {
   memoryAlertThreshold: number
 }
 
-const nowSec = Math.floor(Date.now() / 1000)
-
 export class MemoryStore {
-  containers: ContainerRecord[] = [
-    {
-      id: 'a1b2c3d4e5f6',
-      name: 'kathal-proxy',
-      image: 'nginx:alpine',
-      state: 'running',
-      status: 'Up 3 days',
-      ports: [{ hostPort: 80, containerPort: 80 }, { hostPort: 443, containerPort: 443 }],
-      created: nowSec - 86400 * 3,
-    },
-    {
-      id: 'b2c3d4e5f6a1',
-      name: 'kathal-postgres',
-      image: 'postgres:16-alpine',
-      state: 'running',
-      status: 'Up 5 days',
-      ports: [{ hostPort: 5432, containerPort: 5432 }],
-      volumes: ['pgdata:/var/lib/postgresql/data'],
-      created: nowSec - 86400 * 5,
-    },
-    {
-      id: 'c3d4e5f6a1b2',
-      name: 'kathal-redis',
-      image: 'redis:7-alpine',
-      state: 'running',
-      status: 'Up 5 days',
-      ports: [{ hostPort: 6379, containerPort: 6379 }],
-      volumes: ['redisdata:/data'],
-      created: nowSec - 86400 * 5,
-    },
-    {
-      id: 'd4e5f6a1b2c3',
-      name: 'uptime-kuma',
-      image: 'louislam/uptime-kuma:latest',
-      state: 'exited',
-      status: 'Exited (0) 2 hours ago',
-      ports: [{ hostPort: 3001, containerPort: 3001 }],
-      created: nowSec - 86400 * 2,
-    },
-    {
-      id: 'e5f6a1b2c3d4',
-      name: 'grafana-preview',
-      image: 'grafana/grafana:latest',
-      state: 'paused',
-      status: 'Up 1 day (Paused)',
-      ports: [{ hostPort: 3002, containerPort: 3000 }],
-      created: nowSec - 86400,
-    },
-  ]
+  containers: ContainerRecord[] = []
 
-  images: ImageRecord[] = [
-    { id: 'sha256:9f8e7d6c5b4a', repoTags: ['nginx:alpine'], size: 43253760, created: nowSec - 86400 * 7 },
-    { id: 'sha256:8e7d6c5b4a39', repoTags: ['postgres:16-alpine'], size: 249561088, created: nowSec - 86400 * 10 },
-    { id: 'sha256:7d6c5b4a3928', repoTags: ['redis:7-alpine'], size: 35651584, created: nowSec - 86400 * 14 },
-    { id: 'sha256:6c5b4a392817', repoTags: ['louislam/uptime-kuma:latest'], size: 412090368, created: nowSec - 86400 * 4 },
-    { id: 'sha256:5b4a39281706', repoTags: ['grafana/grafana:latest'], size: 398458880, created: nowSec - 86400 * 3 },
-    { id: 'sha256:4a39281706f5', repoTags: ['node:20-alpine'], size: 134217728, created: nowSec - 86400 * 9 },
-    { id: 'sha256:39281706f5e4', repoTags: ['alpine:3.19'], size: 7864320, created: nowSec - 86400 * 18 },
-  ]
+  images: ImageRecord[] = []
 
-  proxyRoutes: ProxyRoute[] = [
-    {
-      id: 'proxy-1',
-      domain: 'dashboard.kathal.local',
-      target: 'http://localhost:3000',
-      port: 80,
-      ssl: true,
-      enabled: true,
-    },
-    {
-      id: 'proxy-2',
-      domain: 'status.kathal.local',
-      target: 'http://localhost:3001',
-      port: 80,
-      ssl: false,
-      enabled: false,
-    },
-  ]
+  proxyRoutes: ProxyRoute[] = []
 
-  databases: ManagedDatabase[] = [
-    {
-      id: 'db-1',
-      name: 'kathal-main',
-      type: 'postgres',
-      port: 5432,
-      user: 'kathal',
-      password: 'kathal-db-password',
-      status: 'running',
-    },
-    {
-      id: 'db-2',
-      name: 'session-cache',
-      type: 'redis',
-      port: 6379,
-      user: 'default',
-      password: 'redis-password',
-      status: 'running',
-    },
-  ]
+  databases: ManagedDatabase[] = []
 
-  backups: BackupRecord[] = [
-    {
-      id: 'bkp-initial',
-      name: 'initial-snapshot',
-      created_at: new Date(Date.now() - 86400 * 1000).toISOString(),
-      size: '4.2 MB',
-    },
-  ]
+  backups: BackupRecord[] = []
 
-  gitRepos: GitRepo[] = [
-    {
-      id: 'repo-1',
-      name: 'kathal-sample-app',
-      url: 'https://github.com/Kathal-OS/sample-app.git',
-      branch: 'main',
-      deploy_cmd: 'docker compose up -d --build',
-      status: 'success',
-      last_deploy: new Date(Date.now() - 3600 * 1000).toISOString(),
-    },
-  ]
+  gitRepos: GitRepo[] = []
 
-  gitHistory = new Map<string, GitDeployLog[]>([
-    [
-      'repo-1',
-      [
-        {
-          timestamp: new Date(Date.now() - 3600 * 1000).toISOString(),
-          commit: '7f4a21c',
-          output: 'Pulled origin/main\nBuilt image kathal-sample-app:latest\nStarted container kathal-sample-app',
-        },
-      ],
-    ],
-  ])
+  gitHistory = new Map<string, GitDeployLog[]>()
 
-  composeProjects: ComposeProject[] = [
-    {
-      name: 'web-stack',
-      workingDir: '/data/compose/web-stack',
-      filePath: '/data/compose/web-stack/docker-compose.yml',
-      status: 'running',
-      services: ['nginx', 'redis'],
-      config: `version: '3.8'\nservices:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - "80:80"\n  redis:\n    image: redis:7-alpine\n    ports:\n      - "6379:6379"`,
-      updatedAt: new Date(Date.now() - 7200 * 1000).toISOString(),
-    },
-  ]
+  composeProjects: ComposeProject[] = []
 
   envVars: EnvVar[] = [
     {
@@ -325,84 +193,24 @@ export class MemoryStore {
       description: 'Default deployment environment',
       secret: false,
     },
-    {
-      key: 'POSTGRES_PASSWORD',
-      value: 'super-secret-value',
-      description: 'Shared database password',
-      secret: true,
-    },
   ]
 
   networks: NetworkRecord[] = [
     {
-      id: 'net-bridge',
-      name: 'bridge',
-      driver: 'bridge',
+      id: 'net-local',
+      name: 'local-host',
+      driver: 'host',
       scope: 'local',
       internal: false,
       attachable: false,
       ingress: false,
-      containers: ['a1b2c3d4e5f6', 'b2c3d4e5f6a1'],
-    },
-    {
-      id: 'net-kathal',
-      name: 'kathal-internal',
-      driver: 'bridge',
-      scope: 'local',
-      internal: true,
-      attachable: true,
-      ingress: false,
-      containers: ['b2c3d4e5f6a1', 'c3d4e5f6a1b2'],
+      containers: [],
     },
   ]
 
-  volumes: VolumeRecord[] = [
-    {
-      name: 'pgdata',
-      driver: 'local',
-      mountpoint: '/var/lib/docker/volumes/pgdata/_data',
-      scope: 'local',
-      sizeBytes: 512 * 1024 * 1024,
-      createdAt: new Date(Date.now() - 86400 * 10 * 1000).toISOString(),
-    },
-    {
-      name: 'redisdata',
-      driver: 'local',
-      mountpoint: '/var/lib/docker/volumes/redisdata/_data',
-      scope: 'local',
-      sizeBytes: 64 * 1024 * 1024,
-      createdAt: new Date(Date.now() - 86400 * 10 * 1000).toISOString(),
-    },
-    {
-      name: 'old_app_cache',
-      driver: 'local',
-      mountpoint: '/var/lib/docker/volumes/old_app_cache/_data',
-      scope: 'local',
-      sizeBytes: 184 * 1024 * 1024,
-      createdAt: new Date(Date.now() - 86400 * 18 * 1000).toISOString(),
-    },
-    {
-      name: 'legacy_uploads',
-      driver: 'local',
-      mountpoint: '/var/lib/docker/volumes/legacy_uploads/_data',
-      scope: 'local',
-      sizeBytes: 42 * 1024 * 1024,
-      createdAt: new Date(Date.now() - 86400 * 24 * 1000).toISOString(),
-    },
-  ]
+  volumes: VolumeRecord[] = []
 
-  registries: RegistryCredential[] = [
-    {
-      id: 'reg-ghcr',
-      name: 'GitHub Container Registry',
-      registryUrl: 'ghcr.io',
-      username: 'kathal-deploy',
-      password: 'ghp_sampletoken1234567890',
-      email: 'admin@kathal.local',
-      status: 'connected',
-      createdAt: new Date(Date.now() - 86400 * 6 * 1000).toISOString(),
-    },
-  ]
+  registries: RegistryCredential[] = []
 
   apps = new Map<string, AppRecord>()
 
@@ -426,8 +234,6 @@ export class MemoryStore {
   files = new Map<string, VirtualFileNode>([
     ['/', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
     ['/data', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
-    ['/data/stacks', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
-    ['/data/stacks/monitoring', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
     ['/etc', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
     ['/etc/kathal', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
     ['/var', { isDir: true, content: '', updatedAt: new Date().toISOString() }],
@@ -436,24 +242,7 @@ export class MemoryStore {
       '/etc/kathal/config.json',
       {
         isDir: false,
-        content: JSON.stringify({ port: 3000, logLevel: 'info', dbPath: '/data/kathal.db' }, null, 2),
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-    [
-      '/data/docker-compose.yml',
-      {
-        isDir: false,
-        content: "version: '3.8'\nservices:\n  web:\n    image: nginx:alpine\n    ports:\n      - '80:80'\n",
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-    [
-      '/data/stacks/monitoring/docker-compose.yml',
-      {
-        isDir: false,
-        content:
-          "version: '3.8'\nservices:\n  prometheus:\n    image: prom/prometheus:latest\n    ports:\n      - '9090:9090'\n  grafana:\n    image: grafana/grafana:latest\n    ports:\n      - '3002:3000'\n",
+        content: JSON.stringify({ port: 3000, logLevel: 'info', runtime: 'local-native' }, null, 2),
         updatedAt: new Date().toISOString(),
       },
     ],
@@ -461,7 +250,7 @@ export class MemoryStore {
       '/var/log/kathal.log',
       {
         isDir: false,
-        content: `[${new Date().toISOString()}] INFO kathal: dashboard initialized\n[${new Date().toISOString()}] INFO kathal: metrics collector started\n`,
+        content: `[${new Date().toISOString()}] INFO kathal: local runtime initialized (no Docker required)\n`,
         updatedAt: new Date().toISOString(),
       },
     ],
@@ -559,9 +348,12 @@ export class MemoryStore {
     }
   }
 
-  collectMonitoringSample(tsMs = Date.now()): MonitoringSample {
+  collectMonitoringSample(
+    tsMs = Date.now(),
+    activeProcesses?: Array<{ id: string; name: string; pid: number | null }>
+  ): MonitoringSample {
     const sys = this.collectSystemMetrics()
-    const runningContainers = this.containers.filter((c) => c.state === 'running')
+    const procs = activeProcesses || []
 
     return {
       timestamp: new Date(tsMs).toISOString(),
@@ -569,21 +361,21 @@ export class MemoryStore {
       memory: sys.memory,
       disk: { total: sys.disk.total, used: sys.disk.used, free: sys.disk.free, percent: sys.disk.percent },
       network: sys.network,
-      containers: runningContainers.map((c, idx) => ({
+      containers: procs.map((c) => ({
         id: c.id,
         name: c.name,
-        cpuPercent: Number((0.4 + idx * 0.7 + Math.random() * 0.8).toFixed(1)),
-        memoryUsage: (48 + idx * 64) * 1024 * 1024,
-        memoryLimit: 1024 * 1024 * 1024,
-        netIO: { rxBytes: 1200000 + idx * 450000, txBytes: 840000 + idx * 220000 },
-        blockIO: { readBytes: 5120000 + idx * 1024000, writeBytes: 1280000 + idx * 512000 },
-        pids: 6 + idx * 4,
+        cpuPercent: 0.4,
+        memoryUsage: 32 * 1024 * 1024,
+        memoryLimit: sys.memory.total,
+        netIO: { rxBytes: 0, txBytes: 0 },
+        blockIO: { readBytes: 0, writeBytes: 0 },
+        pids: c.pid ? 1 : 0,
       })),
     }
   }
 
-  pushMonitoringSample() {
-    const sample = this.collectMonitoringSample()
+  pushMonitoringSample(activeProcesses?: Array<{ id: string; name: string; pid: number | null }>) {
+    const sample = this.collectMonitoringSample(Date.now(), activeProcesses)
     this.monitoringHistory.push(sample)
     if (this.monitoringHistory.length > 60) {
       this.monitoringHistory = this.monitoringHistory.slice(-60)

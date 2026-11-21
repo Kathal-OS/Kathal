@@ -111,7 +111,7 @@ export default function Templates() {
         <div>
           <h1 className="text-3xl font-bold text-slate-100">App Store &amp; Templates</h1>
           <p className="text-slate-400 text-sm mt-1">
-            {totalTemplates} ready-to-run apps — pick one, give it a friendly name, and launch with zero code.
+            {totalTemplates} ready-to-run apps — installs locally via Node.js &amp; Python without Docker.
           </p>
         </div>
         <div className="relative w-full sm:w-72">
@@ -246,12 +246,10 @@ export default function Templates() {
             </div>
 
             <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 mb-5 text-xs space-y-1.5">
-              <div><span className="text-slate-500">Package Image:</span> <code className="text-slate-200 font-mono">{selected.image}</code></div>
+              <div><span className="text-slate-500">Execution Mode:</span> <span className="text-green-400 font-medium">Local Native Runtime (No Docker)</span></div>
+              <div><span className="text-slate-500">Template Reference:</span> <code className="text-slate-200 font-mono">{selected.image}</code></div>
               {selected.ports?.length > 0 && (
                 <div><span className="text-slate-500">Default Ports:</span> <span className="text-slate-200 tabular-nums">{selected.ports.join(', ')}</span></div>
-              )}
-              {selected.volumes?.length > 0 && (
-                <div><span className="text-slate-500">Data Folders:</span> <span className="text-slate-200 font-mono">{selected.volumes.join(', ')}</span></div>
               )}
               {selected.env_vars?.length > 0 && (
                 <div><span className="text-slate-500">Included Config:</span> <span className="text-slate-200 font-mono">{selected.env_vars.join(', ')}</span></div>
@@ -311,19 +309,31 @@ export default function Templates() {
               {deployResult && (
                 <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-xs space-y-2">
                   <p className="font-semibold text-green-400">
-                    Launched {deployResult.container?.name} on port {deployResult.app?.port}
+                    Running {deployResult.container?.name} locally on port {deployResult.app?.port}
+                    {deployResult.container?.pid ? ` (PID ${deployResult.container.pid})` : ''}
                   </p>
                   {deployResult.proxyRoute && (
                     <p className="text-slate-300">
-                      Web Address: <code className="text-green-300 font-mono">{deployResult.proxyRoute.domain}</code> → {deployResult.proxyRoute.target}
+                      Domain: <code className="text-green-300 font-mono">{deployResult.proxyRoute.domain}</code> → {deployResult.proxyRoute.target}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2 pt-1">
+                    {deployResult.liveUrl && (
+                      <a
+                        href={deployResult.liveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                      >
+                        <span>Open Live App</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
                     <Link to="/containers" className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
-                      Open Running Apps →
+                      Manage Apps →
                     </Link>
                     <Link to="/proxy" className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
-                      Open Domains →
+                      Connect Domain →
                     </Link>
                   </div>
                 </div>

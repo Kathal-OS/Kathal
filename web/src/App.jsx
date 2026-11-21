@@ -3,9 +3,11 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
 import QuickLaunchModal from './components/QuickLaunchModal'
+import OfflineIndicator from './components/OfflineIndicator'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Containers from './pages/Containers'
+import NativeProcesses from './pages/NativeProcesses'
 import Images from './pages/Images'
 import ProxyManager from './pages/ProxyManager'
 import Databases from './pages/Databases'
@@ -92,6 +94,7 @@ export default function App() {
       />
 
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        <OfflineIndicator />
         <TopBar
           onOpenMobileNav={() => setMobileNavOpen(true)}
           onOpenQuickLaunch={() => setQuickLaunchOpen(true)}
@@ -111,6 +114,7 @@ export default function App() {
               }
             />
             <Route path="/containers" element={<ProtectedRoute token={token}><Containers key={deploySignal} /></ProtectedRoute>} />
+            <Route path="/processes" element={<ProtectedRoute token={token}><NativeProcesses key={deploySignal} /></ProtectedRoute>} />
             <Route path="/images" element={<ProtectedRoute token={token}><Images /></ProtectedRoute>} />
             <Route path="/registries" element={<ProtectedRoute token={token}><Registries /></ProtectedRoute>} />
             <Route path="/volumes" element={<ProtectedRoute token={token}><Volumes /></ProtectedRoute>} />

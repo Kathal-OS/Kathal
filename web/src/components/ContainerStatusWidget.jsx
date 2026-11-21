@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Box, RefreshCw, ArrowRight } from 'lucide-react'
+import { Box, RefreshCw, ArrowRight, ExternalLink } from 'lucide-react'
 import { apiFetch } from '../hooks/useApi'
 
 function normalizeState(container) {
   const raw = String(container?.state || container?.status || '').toLowerCase()
-  if (raw === 'running' || raw.startsWith('up')) {
-    return raw.includes('paused') ? 'paused' : 'running'
-  }
-  if (raw === 'paused') return 'paused'
+  if (raw === 'running' || raw.startsWith('up')) return 'running'
   return 'stopped'
 }
 
@@ -18,11 +15,6 @@ const STATE_STYLES = {
     text: 'text-green-400',
     label: 'Running',
   },
-  paused: {
-    bar: 'bg-amber-400',
-    text: 'text-amber-400',
-    label: 'Paused',
-  },
   stopped: {
     bar: 'bg-slate-500',
     text: 'text-slate-400',
@@ -30,7 +22,7 @@ const STATE_STYLES = {
   },
 }
 
-export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 }) {
+export default function ContainerStatusWidget({ refreshKey = 0 }) {
   const [containers, setContainers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -42,7 +34,7 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
       const list = Array.isArray(data) ? data : (data?.containers || [])
       setContainers(list)
     } catch (err) {
-      setError(err.message || 'Failed to load apps')
+      setError(err.message || 'Failed to load local apps')
       setContainers([])
     } finally {
       setLoading(false)
@@ -61,7 +53,7 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
       acc[state] += 1
       return acc
     },
-    { running: 0, paused: 0, stopped: 0 }
+    { running: 0, stopped: 0 }
   )
 
   const total = containers.length
@@ -73,12 +65,10 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
         <div>
           <div className="flex items-center gap-2">
             <Box className="w-4 h-4 text-kathal-400" />
-            <h2 className="text-lg font-semibold text-slate-100">Running Apps Overview</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Running Local Apps</h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5 tabular-nums">
-            {dockerAvailable === false
-              ? 'Container engine unavailable — system-only mode'
-              : `${total} total app${total === 1 ? '' : 's'} · ${counts.running} running · ${counts.paused} paused · ${counts.stopped} stopped`}
+            Local Native Runtime (No Docker) · {total} installed · {counts.running} running · {counts.stopped} stopped
           </p>
         </div>
 
@@ -108,9 +98,9 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
         </div>
       )}
 
-      {/* Clean horizontal KPI strip without nested cards */}
-      <div className="grid grid-cols-3 gap-4 pb-4 border-b border-slate-800/80 mb-4">
-        {(['running', 'paused', 'stopped']).map((key) => {
+      {/* Clean horizontal KPI strip */}
+      <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-800/80 mb-4">
+        {(['running', 'stopped']).map((key) => {
           const style = STATE_STYLES[key]
           const count = counts[key]
           return (
@@ -137,12 +127,6 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
               style={{ width: `${(counts.running / total) * 100}%` }}
             />
           )}
-          {counts.paused > 0 && (
-            <div
-              className="bg-amber-400 h-full transition-all duration-300"
-              style={{ width: `${(counts.paused / total) * 100}%` }}
-            />
-          )}
           {counts.stopped > 0 && (
             <div
               className="bg-slate-500 h-full transition-all duration-300"
@@ -152,11 +136,13 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
         </div>
       )}
 
-      {/* Compact container rows */}
+      {/* Real local process rows */}
       {loading && total === 0 ? (
-        <div className="text-sm text-slate-500 py-4 text-center">Loading apps...</div>
+        <div className="text-sm text-slate-500 py-4 text-center">Loading local apps...</div>
       ) : total === 0 ? (
-        <div className="text-sm text-slate-500 py-4 text-center">No apps deployed yet.</div>
+        <div className="text-sm text-slate-500 py-4 text-center">
+          No local apps installed yet. Click &quot;Launch App&quot; above to install and run one directly on this host.
+        </div>
       ) : (
         <div className="divide-y divide-slate-800/70">
           {containers.map((c) => {
@@ -169,15 +155,30 @@ export default function ContainerStatusWidget({ dockerAvailable, refreshKey = 0 
               >
                 <div className="min-w-0">
                   <p className="font-medium text-slate-100 truncate">{c.name || c.id}</p>
-                  <p className="text-xs text-slate-500 font-mono truncate">{c.image}</p>
+                  <p className="text-xs text-slate-500 font-mono truncate">
+                    {c.runtimeLabel || c.image}
+                    {c.port ? ` · 127.0.0.1:${c.port}` : ''}
+                    {c.pid ? ` · PID ${c.pid}` : ''}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 ml-3 text-xs">
                   {c.status && (
                     <span className="hidden md:inline text-slate-400 tabular-nums">{c.status}</span>
                   )}
                   <span className={`font-medium capitalize ${style.text}`}>
-                    {c.state || style.label}
+                    {style.label}
                   </span>
+                  {c.state === 'running' && c.liveUrl && (
+                    <a
+                      href={c.liveUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-600/20 hover:bg-green-600 text-green-300 hover:text-white border border-green-500/30 transition-colors"
+                    >
+                      <span>Open</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </div>
               </div>
             )

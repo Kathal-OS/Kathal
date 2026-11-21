@@ -5,6 +5,7 @@ const ROUTE_META = {
   '/': { section: 'Overview', title: 'Dashboard', hint: 'Server health, running apps, and quick actions' },
   '/templates': { section: 'Overview', title: 'App Store', hint: 'One-click apps ready to run with zero setup' },
   '/containers': { section: 'Overview', title: 'Running Apps', hint: 'Start, stop, restart, or inspect logs for your apps' },
+  '/processes': { section: 'Overview', title: 'Native Processes', hint: 'Live host PIDs, CPU%, memory usage, and uptime' },
   '/compose': { section: 'Overview', title: 'Compose Stacks', hint: 'Multi-service app groups parsed from Compose files' },
   '/images': { section: 'Images & Storage', title: 'Images', hint: 'Downloaded app packages and disk cleanup' },
   '/registries': { section: 'Images & Storage', title: 'Registries', hint: 'Saved login credentials for private registries' },

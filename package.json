@@ -10,6 +10,7 @@
     "dev": "tsx server.ts",
     "build": "vite build --config web/vite.config.js && tsc --noEmit",
     "start": "node server.ts",
+    "desktop": "electron electron/main.cjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

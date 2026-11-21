@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { RefreshCw, FileText } from 'lucide-react'
 import { apiFetch, apiPost } from '../hooks/useApi'
 
 export default function Logs() {
@@ -73,26 +74,31 @@ export default function Logs() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Container Logs</h1>
-          <p className="text-gray-500 mt-1">Inspect stdout/stderr streams and search deployment output</p>
+          <h1 className="text-3xl font-bold text-slate-100">Live App Logs</h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Inspect real stdout and stderr streams from your running local app processes
+          </p>
         </div>
         <button
           onClick={loadContainers}
-          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-200"
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-200 transition-colors"
         >
-          🔄 Refresh Containers
+          <RefreshCw className="w-4 h-4" />
+          <span>Refresh Apps</span>
         </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Container List */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Containers</h2>
+        {/* App List */}
+        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+          <h2 className="text-sm font-semibold text-slate-300 mb-3">Installed Apps</h2>
           {containers.length === 0 ? (
-            <div className="text-center text-gray-500 py-8 text-sm">No containers found</div>
+            <div className="text-center text-slate-500 py-8 text-sm">
+              No local apps running yet
+            </div>
           ) : (
             <div className="space-y-2 max-h-[65vh] overflow-y-auto">
               {containers.map((c) => {
@@ -105,14 +111,14 @@ export default function Logs() {
                     className={`w-full text-left p-3 rounded-lg border transition-colors ${
                       active
                         ? 'bg-kathal-600/20 border-kathal-500/40 text-white'
-                        : 'bg-gray-950/60 border-gray-800 text-gray-300 hover:bg-gray-800/60'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-800/60'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-gray-500'}`} />
+                      <span className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-slate-500'}`} />
                       <span className="text-sm font-medium truncate">{c.name}</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1 truncate">{c.image}</p>
+                    <p className="text-xs text-slate-500 mt-1 truncate">{c.image}</p>
                   </button>
                 )
               })}
@@ -121,21 +127,22 @@ export default function Logs() {
         </div>
 
         {/* Logs View */}
-        <div className="lg:col-span-3 bg-gray-900 border border-gray-800 rounded-xl flex flex-col h-[70vh] min-h-[420px]">
+        <div className="lg:col-span-3 bg-[#111827] border border-slate-800/90 rounded-xl flex flex-col h-[70vh] min-h-[420px]">
           {!selectedContainer ? (
-            <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
-              Select a container to view logs
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
+              <FileText className="w-8 h-8 text-slate-600" />
+              <span>Select a local app to stream its logs</span>
             </div>
           ) : (
             <>
-              <div className="p-4 border-b border-gray-800 flex flex-wrap items-center gap-3">
+              <div className="p-4 border-b border-slate-800 flex flex-wrap items-center gap-3">
                 <div>
-                  <h3 className="font-semibold text-gray-100">{selectedContainer.name}</h3>
-                  <p className="text-xs text-gray-500">{selectedContainer.image}</p>
+                  <h3 className="font-semibold text-slate-100">{selectedContainer.name}</h3>
+                  <p className="text-xs text-slate-500">{selectedContainer.image}</p>
                 </div>
 
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer px-2 py-1 bg-gray-800 rounded-lg">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer px-2.5 py-1.5 bg-slate-800 rounded-lg">
                     <input
                       type="checkbox"
                       checked={follow}
@@ -147,7 +154,7 @@ export default function Logs() {
                   <select
                     value={tail}
                     onChange={(e) => setTail(parseInt(e.target.value, 10))}
-                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200"
+                    className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200"
                   >
                     <option value={50}>50 lines</option>
                     <option value={100}>100 lines</option>
@@ -158,7 +165,7 @@ export default function Logs() {
                     placeholder="Filter..."
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
-                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 w-36"
+                    className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 w-36"
                   />
                   <input
                     type="text"
@@ -166,7 +173,7 @@ export default function Logs() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && searchLogs()}
-                    className="px-2.5 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-200 w-36"
+                    className="px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-200 w-36"
                   />
                   <button
                     onClick={searchLogs}
@@ -178,23 +185,23 @@ export default function Logs() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed bg-gray-950/60">
+              <div className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed bg-slate-950/60">
                 {loading ? (
-                  <div className="text-gray-500 text-center py-8">Loading logs...</div>
+                  <div className="text-slate-500 text-center py-8">Loading process logs...</div>
                 ) : logs.length === 0 ? (
-                  <div className="text-gray-500 text-center py-8">No logs found</div>
+                  <div className="text-slate-500 text-center py-8">No log lines captured yet</div>
                 ) : (
                   logs.map((line, i) => (
                     <div
                       key={i}
-                      className={`py-1 border-b border-gray-900 break-words ${
-                        line.stream === 'stderr' ? 'text-red-400' : 'text-gray-300'
+                      className={`py-1 border-b border-slate-900 break-words ${
+                        line.stream === 'stderr' ? 'text-red-400' : 'text-slate-300'
                       }`}
                     >
-                      <span className="text-gray-600 mr-2 tabular-nums">
+                      <span className="text-slate-600 mr-2 tabular-nums">
                         {line.timestamp ? new Date(line.timestamp).toLocaleTimeString() : ''}
                       </span>
-                      <span className="text-gray-500 mr-2 uppercase text-[10px]">{line.stream}</span>
+                      <span className="text-slate-500 mr-2 uppercase text-[10px]">{line.stream}</span>
                       <span>{line.content}</span>
                     </div>
                   ))

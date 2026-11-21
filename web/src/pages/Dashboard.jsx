@@ -7,12 +7,12 @@ import {
   ArrowUpDown,
   Globe,
   Database,
-  Layers,
+  FileText,
   Activity,
   Rocket,
   ArrowRight,
   CheckCircle2,
-  AlertTriangle,
+  ExternalLink,
 } from 'lucide-react'
 import { useApi, apiFetch, apiPost } from '../hooks/useApi'
 import ContainerStatusWidget from '../components/ContainerStatusWidget'
@@ -52,36 +52,32 @@ function formatUptime(seconds) {
 
 const QUICK_APPS = [
   {
-    id: 'nginx',
-    name: 'Website Host (Nginx)',
-    desc: 'Serve websites or landing pages',
+    id: 'my-website',
+    runtime: 'static',
+    name: 'Static Website Host',
+    desc: 'Instant local HTML/CSS/JS site server',
     icon: Globe,
-    image: 'nginx:alpine',
-    port: 80,
   },
   {
-    id: 'postgres',
-    name: 'PostgreSQL Database',
-    desc: 'Structured database for your apps',
+    id: 'my-blog',
+    runtime: 'cms',
+    name: 'Blog & CMS Studio',
+    desc: 'Native Node.js CMS with live post publishing',
+    icon: FileText,
+  },
+  {
+    id: 'sqlite-studio',
+    runtime: 'sqlite',
+    name: 'SQLite Database Studio',
+    desc: 'Local SQLite3 database + web row browser',
     icon: Database,
-    image: 'postgres:16-alpine',
-    port: 5432,
   },
   {
-    id: 'redis',
-    name: 'Redis Cache',
-    desc: 'Fast in-memory key-value store',
-    icon: Layers,
-    image: 'redis:7-alpine',
-    port: 6379,
-  },
-  {
-    id: 'uptime-kuma',
-    name: 'Uptime Monitor',
-    desc: 'Watch site & API availability',
+    id: 'uptime-monitor',
+    runtime: 'monitor',
+    name: 'Uptime Status Monitor',
+    desc: 'Real-time local service & host monitor',
     icon: Activity,
-    image: 'louislam/uptime-kuma:latest',
-    port: 3001,
   },
 ]
 
@@ -119,17 +115,17 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
     try {
       const res = await apiPost('/deploy', {
         name: app.id,
-        image: app.image,
-        containerPort: app.port,
+        runtime: app.runtime,
         autoDomain: true,
         source: 'quick-deploy',
       })
       setDeployNotice({
         type: 'success',
-        title: `${app.name} is now running`,
+        title: `${app.name} is installed & running live`,
         detail: `Port ${res.app?.port}${
-          res.proxyRoute ? ` · Web domain ${res.proxyRoute.domain}` : ''
-        }`,
+          res.container?.pid ? ` · PID ${res.container.pid}` : ''
+        }${res.proxyRoute ? ` · Domain ${res.proxyRoute.domain}` : ''}`,
+        liveUrl: res.liveUrl,
       })
       await refreshDashboard()
     } catch (err) {
@@ -167,17 +163,8 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span className="inline-flex items-center gap-1.5 font-medium text-green-400">
-              {status?.dockerAvailable ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Engine Connected</span>
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-amber-400">System Mode</span>
-                </>
-              )}
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Local Native Runtime Active (No Docker)</span>
             </span>
             <span aria-hidden="true" className="text-slate-600">·</span>
             <span>{status?.platform || 'linux'} ({status?.arch || 'x64'})</span>
@@ -188,16 +175,16 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
             Server Control Center
           </h1>
           <p className="text-sm text-slate-400">
-            {runningCount} {runningCount === 1 ? 'app is' : 'apps are'} currently running. Launch a new app in one click without writing code.
+            {runningCount} local {runningCount === 1 ? 'app is' : 'apps are'} running live. Install websites, Node.js, Python, or Git repos locally and connect custom domains.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <Link
-            to="/templates"
+            to="/git"
             className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-medium whitespace-nowrap transition-colors"
           >
-            Browse App Store
+            Deploy Git Repo
           </Link>
           {onOpenQuickLaunch && (
             <button
@@ -206,7 +193,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-kathal-600 hover:bg-kathal-500 text-white text-sm font-medium whitespace-nowrap transition-colors"
             >
               <Rocket className="w-4 h-4" />
-              <span>Launch New App</span>
+              <span>Install Local App</span>
             </button>
           )}
         </div>
@@ -243,26 +230,26 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
       {/* Live Host CPU & Memory Monitoring Widget */}
       <HostMonitoringWidget />
 
-      {/* Docker container status widget */}
-      <ContainerStatusWidget dockerAvailable={status?.dockerAvailable} refreshKey={refreshKey} />
+      {/* Real Running Local Apps Widget */}
+      <ContainerStatusWidget refreshKey={refreshKey} />
 
       {/* Quick Actions */}
       <QuickActionsWidget onPruned={refreshDashboard} />
 
-      {/* One-Click Popular Apps */}
+      {/* One-Click Popular Local Apps */}
       <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">One-Click Popular Apps</h2>
+            <h2 className="text-lg font-semibold text-slate-100">One-Click Local Apps (Zero Docker)</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Start ready-made websites, databases, and monitors instantly — ports and web addresses are handled automatically.
+              Installs real apps on disk and runs them directly via Node.js &amp; Python 3 with instant preview URLs and domain routing.
             </p>
           </div>
           <Link
             to="/templates"
             className="inline-flex items-center gap-1 text-xs text-kathal-400 hover:text-kathal-300 font-medium whitespace-nowrap"
           >
-            <span>See all 14+ templates</span>
+            <span>Browse all app templates</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
@@ -281,11 +268,22 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
             </div>
             {deployNotice.type === 'success' && (
               <div className="flex items-center gap-2">
+                {deployNotice.liveUrl && (
+                  <a
+                    href={deployNotice.liveUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                  >
+                    <span>Open Live App</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
                 <Link to="/containers" className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
-                  Running Apps →
+                  Manage Apps →
                 </Link>
                 <Link to="/proxy" className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200">
-                  Domains →
+                  Connect Domain →
                 </Link>
               </div>
             )}
@@ -309,7 +307,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
                     <Icon className="w-4 h-4" />
                   </div>
                   <span className="text-[11px] font-medium text-kathal-400 opacity-80 group-hover:opacity-100">
-                    {isDeploying ? 'Starting...' : 'Launch →'}
+                    {isDeploying ? 'Starting...' : 'Install & Run →'}
                   </span>
                 </div>
                 <p className="font-semibold text-sm text-slate-100 group-hover:text-kathal-400 transition-colors">
@@ -349,27 +347,27 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
         </div>
 
         <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
-          <h2 className="text-base font-semibold text-slate-100 mb-4">Container Summary</h2>
+          <h2 className="text-base font-semibold text-slate-100 mb-4">Local Runtime Summary</h2>
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-slate-800/60 pb-2">
-              <dt className="text-slate-400">Engine Version</dt>
+              <dt className="text-slate-400">Execution Mode</dt>
               <dd className="text-slate-200 font-mono text-xs">
-                {status?.dockerVersion ? `v${status.dockerVersion}` : 'N/A'}
+                {status?.runtimeEngine || 'Local Native Runtime'}
               </dd>
             </div>
             <div className="flex justify-between border-b border-slate-800/60 pb-2">
-              <dt className="text-slate-400">Running Apps</dt>
+              <dt className="text-slate-400">Running Local Apps</dt>
               <dd className="text-green-400 font-semibold tabular-nums">{docker?.containersRunning || 0}</dd>
             </div>
             <div className="flex justify-between border-b border-slate-800/60 pb-2">
-              <dt className="text-slate-400">Paused / Stopped</dt>
-              <dd className="text-slate-300 tabular-nums">
-                {(docker?.containersPaused || 0)} paused · {(docker?.containersStopped || 0)} stopped
-              </dd>
+              <dt className="text-slate-400">Stopped Apps</dt>
+              <dd className="text-slate-300 tabular-nums">{docker?.containersStopped || 0}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-400">Saved Images</dt>
-              <dd className="text-slate-200 tabular-nums">{docker?.imagesCount || 0}</dd>
+              <dt className="text-slate-400">Apps Folder</dt>
+              <dd className="text-slate-300 font-mono text-xs truncate max-w-[220px]">
+                {status?.appsRoot || '/tmp/kathal-apps'}
+              </dd>
             </div>
           </dl>
         </div>

@@ -20,7 +20,9 @@ import {
   Settings,
   LogOut,
   X,
+  Cpu,
 } from 'lucide-react'
+import PWAInstallButton from './PWAInstallButton'
 
 const navGroups = [
   {
@@ -29,6 +31,7 @@ const navGroups = [
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/templates', icon: Store, label: 'App Store' },
       { to: '/containers', icon: Box, label: 'Running Apps' },
+      { to: '/processes', icon: Cpu, label: 'Native Processes' },
       { to: '/compose', icon: Layers, label: 'Compose Stacks' },
     ],
   },
@@ -127,8 +130,9 @@ export default function Sidebar({ user, onLogout, mobileOpen = false, onClose })
         ))}
       </nav>
 
-      {/* Account Footer */}
-      <div className="p-3 border-t border-slate-800/80 shrink-0">
+      {/* Account & Desktop App Footer */}
+      <div className="p-3 border-t border-slate-800/80 shrink-0 space-y-2">
+        <PWAInstallButton compact />
         <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800/70">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-7 h-7 rounded-md bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-semibold text-slate-200 shrink-0">
