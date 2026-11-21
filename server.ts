@@ -10,7 +10,11 @@ import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MemoryStore } from './src/store.ts'
-import { SERVICE_TEMPLATES } from './src/templates.ts'
+import {
+  SERVICE_TEMPLATES,
+  CATEGORY_DEFINITIONS,
+  getTemplateById,
+} from './src/templates.ts'
 import {
   LocalRuntimeManager,
   type LocalAppInstance,
@@ -21,6 +25,7 @@ import {
   sanitizeAppName,
 } from './src/localRuntime.ts'
 import { NativeProcessService, type NativeProcessInstance } from './src/nativeProcess.ts'
+import { AppInstallerEngine, detectHostRuntimes, type InstalledAppRecord } from './src/installerEngine.ts'
 import { ProxyConfigManager } from './src/proxyConfig.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -57,9 +62,17 @@ if (loadedProxyConfig) {
 }
 
 const localRuntime = new LocalRuntimeManager()
-const nativeProcesses = new NativeProcessService({
+const nativeProcesses: NativeProcessService = new NativeProcessService({
   appsRoot: localRuntime.getAppsRoot(),
-  isPortReserved: (port) => localRuntime.listApps().some((a) => a.port === port),
+  isPortReserved: (port: number): boolean =>
+    localRuntime.listApps().some((a) => a.port === port) ||
+    installerEngine.listAll().some((i) => i.port === port),
+})
+const installerEngine: AppInstallerEngine = new AppInstallerEngine({
+  appsRoot: localRuntime.getAppsRoot(),
+  isPortReserved: (port: number): boolean =>
+    localRuntime.listApps().some((a) => a.port === port) ||
+    nativeProcesses.listProcesses().some((p) => p.port === port),
 })
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
 
@@ -163,7 +176,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const liveMatch = /^\/live\/([a-z0-9-_]+)(\/.*)?$/i.exec(req.path)
   if (liveMatch) {
     const requestedName = sanitizeAppName(liveMatch[1])
-    const targetApp = localRuntime.findByName(requestedName) || nativeProcesses.findByName(requestedName)
+    const targetApp =
+      localRuntime.findByName(requestedName) ||
+      nativeProcesses.findByName(requestedName) ||
+      installerEngine.findByName(requestedName)
     if (!targetApp) {
       res.status(404).send(`App "${requestedName}" is not installed.`)
       return
@@ -373,10 +389,15 @@ function serializeNativeProcess(proc: NativeProcessInstance) {
   return attachProxyDomains(nativeProcesses.serializeProcess(proc))
 }
 
+function serializeInstallation(rec: InstalledAppRecord) {
+  return attachProxyDomains(installerEngine.serializeInstallation(rec))
+}
+
 function listAllSerializedWorkload() {
   const apps = localRuntime.listApps().map(serializeLocalApp)
   const binaries = nativeProcesses.listProcesses().map(serializeNativeProcess)
-  return [...apps, ...binaries].sort((a, b) => b.created - a.created)
+  const installed = installerEngine.listAll().map(serializeInstallation)
+  return [...apps, ...binaries, ...installed].sort((a, b) => b.created - a.created)
 }
 
 function getAllRunningForMetrics() {
@@ -388,7 +409,11 @@ function getAllRunningForMetrics() {
     .listProcesses()
     .filter((p) => p.state === 'running')
     .map((p) => ({ id: p.id, name: p.name, pid: p.pid }))
-  return [...apps, ...bins]
+  const installed = installerEngine
+    .listAll()
+    .filter((r) => r.state === 'running')
+    .map((r) => ({ id: r.id, name: r.name, pid: r.pid }))
+  return [...apps, ...bins, ...installed]
 }
 
 // ==================== SYSTEM ====================
@@ -835,6 +860,11 @@ api.post('/containers/:id/start', async (req: Request, res: Response) => {
     res.json({ status: 'started', app: serializeLocalApp(appItem) })
     return
   }
+  const instItem = await installerEngine.startApp(id)
+  if (instItem) {
+    res.json({ status: 'started', app: serializeInstallation(instItem) })
+    return
+  }
   try {
     const procItem = await nativeProcesses.startProcess(id)
     if (procItem) {
@@ -855,6 +885,11 @@ api.post('/containers/:id/stop', async (req: Request, res: Response) => {
     res.json({ status: 'stopped', app: serializeLocalApp(appItem) })
     return
   }
+  const instItem = await installerEngine.stopApp(id)
+  if (instItem) {
+    res.json({ status: 'stopped', app: serializeInstallation(instItem) })
+    return
+  }
   const procItem = await nativeProcesses.stopProcess(id)
   if (procItem) {
     res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
@@ -870,6 +905,11 @@ api.post('/containers/:id/pause', async (req: Request, res: Response) => {
     res.json({ status: 'stopped', app: serializeLocalApp(appItem) })
     return
   }
+  const instItem = await installerEngine.stopApp(id)
+  if (instItem) {
+    res.json({ status: 'stopped', app: serializeInstallation(instItem) })
+    return
+  }
   const procItem = await nativeProcesses.stopProcess(id)
   if (procItem) {
     res.json({ status: 'stopped', app: serializeNativeProcess(procItem) })
@@ -883,6 +923,11 @@ api.post('/containers/:id/restart', async (req: Request, res: Response) => {
   const appItem = await localRuntime.restartApp(id)
   if (appItem) {
     res.json({ status: 'restarted', app: serializeLocalApp(appItem) })
+    return
+  }
+  const instItem = await installerEngine.restartApp(id)
+  if (instItem) {
+    res.json({ status: 'restarted', app: serializeInstallation(instItem) })
     return
   }
   try {
@@ -909,6 +954,15 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     res.json({ status: 'deleted' })
     return
   }
+  const existingInst = installerEngine.installations.get(id)
+  if (existingInst) {
+    const oldPort = existingInst.port
+    await installerEngine.uninstall(existingInst.id)
+    store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
+    proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    res.json({ status: 'deleted' })
+    return
+  }
   const existingBin = nativeProcesses.processes.get(id)
   if (existingBin) {
     const oldPort = existingBin.port
@@ -924,7 +978,13 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
 api.get('/containers/:id/logs', (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appLines = localRuntime.getAppLogs(id, 150)
-  const lines = appLines.length > 0 ? appLines : nativeProcesses.getLogs(id, 150)
+  const inst = installerEngine.installations.get(id) || installerEngine.findByName(id)
+  const lines =
+    appLines.length > 0
+      ? appLines
+      : inst
+      ? inst.logs.slice(-150)
+      : nativeProcesses.getLogs(id, 150)
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
 
@@ -934,7 +994,8 @@ api.post('/apps/:id/domain', (req: Request, res: Response) => {
   const key = String(req.params.id)
   const targetApp = localRuntime.apps.get(key) || localRuntime.findByName(key)
   const targetBin = nativeProcesses.getProcess(key)
-  const target = targetApp || targetBin
+  const targetInst = installerEngine.installations.get(key) || installerEngine.findByName(key)
+  const target = targetApp || targetBin || targetInst
   if (!target) {
     res.status(404).json({ error: 'app not found' })
     return
@@ -947,7 +1008,11 @@ api.post('/apps/:id/domain', (req: Request, res: Response) => {
   const route = upsertAppProxyRoute(target.name, target.port, domain, false)
   res.json({
     route,
-    app: targetApp ? serializeLocalApp(targetApp) : serializeNativeProcess(targetBin!),
+    app: targetApp
+      ? serializeLocalApp(targetApp)
+      : targetInst
+      ? serializeInstallation(targetInst)
+      : serializeNativeProcess(targetBin!),
   })
 })
 
@@ -1221,7 +1286,10 @@ api.post('/proxy', (req: Request, res: Response) => {
   }
 
   if (!target && appName) {
-    const foundApp = localRuntime.findByName(appName) || nativeProcesses.findByName(appName)
+    const foundApp =
+      localRuntime.findByName(appName) ||
+      nativeProcesses.findByName(appName) ||
+      installerEngine.findByName(appName)
     if (!foundApp) {
       res.status(404).json({ error: `App "${appName}" was not found` })
       return
@@ -1633,26 +1701,62 @@ api.post('/backups/import', upload.single('file'), (req: Request, res: Response)
   res.json({ status: 'imported', message: 'Backup archive imported successfully.' })
 })
 
-// ==================== SERVICE TEMPLATES ====================
+// ==================== APP STORE, RUNTIMES & INSTALLATION ENGINE ====================
+
+api.get('/runtimes', async (req: Request, res: Response) => {
+  const report = await detectHostRuntimes(req.query.refresh === 'true')
+  res.json(report)
+})
+
+function filterAndSortTemplates(query: Request['query']) {
+  const category = String(query.category || '').trim().toLowerCase()
+  const compatibility = String(query.compatibility || '').trim()
+  const difficulty = String(query.difficulty || '').trim().toLowerCase()
+  const runtime = String(query.runtime || '').trim().toLowerCase()
+  const dockerFree = String(query.dockerFree || '').trim().toLowerCase()
+  const featured = String(query.featured || '').trim().toLowerCase()
+  const q = String(query.q || '').trim().toLowerCase()
+  const sort = String(query.sort || 'popular').trim().toLowerCase()
+
+  let list = SERVICE_TEMPLATES.filter((t) => {
+    if (category && t.category !== category) return false
+    if (compatibility && t.compatibility !== compatibility) return false
+    if (difficulty && t.difficulty !== difficulty) return false
+    if (runtime && !t.runtime.toLowerCase().includes(runtime)) return false
+    if (dockerFree === 'true' && !t.dockerFreeSupported) return false
+    if (dockerFree === 'false' && t.dockerFreeSupported) return false
+    if (featured === 'true' && !t.featured) return false
+    if (q) {
+      const matches =
+        t.name.toLowerCase().includes(q) ||
+        t.id.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q) ||
+        t.category.toLowerCase().includes(q) ||
+        t.runtime.toLowerCase().includes(q) ||
+        t.compatibility.toLowerCase().includes(q) ||
+        t.tags.some((tag) => tag.toLowerCase().includes(q))
+      if (!matches) return false
+    }
+    return true
+  })
+
+  list = [...list]
+  if (sort === 'alpha') {
+    list.sort((a, b) => a.name.localeCompare(b.name))
+  } else if (sort === 'recent') {
+    list.sort((a, b) => b.addedAt.localeCompare(a.addedAt) || b.popularity - a.popularity)
+  } else {
+    list.sort((a, b) => b.popularity - a.popularity || a.name.localeCompare(b.name))
+  }
+  return list
+}
 
 api.get('/templates', (req: Request, res: Response) => {
-  const category = String(req.query.category || '')
-  const list = category
-    ? SERVICE_TEMPLATES.filter((t) => t.category === category)
-    : SERVICE_TEMPLATES
-  res.json([...list].sort((a, b) => a.name.localeCompare(b.name)))
+  res.json(filterAndSortTemplates(req.query))
 })
 
 api.get('/templates/search', (req: Request, res: Response) => {
-  const q = String(req.query.q || '').toLowerCase()
-  const list = SERVICE_TEMPLATES.filter(
-    (t) =>
-      t.name.toLowerCase().includes(q) ||
-      t.description.toLowerCase().includes(q) ||
-      t.category.toLowerCase().includes(q) ||
-      t.tags.some((tag) => tag.toLowerCase().includes(q))
-  )
-  res.json(list.sort((a, b) => a.name.localeCompare(b.name)))
+  res.json(filterAndSortTemplates(req.query))
 })
 
 api.get('/templates/categories', (_req: Request, res: Response) => {
@@ -1660,27 +1764,48 @@ api.get('/templates/categories', (_req: Request, res: Response) => {
   for (const t of SERVICE_TEMPLATES) {
     counts[t.category] = (counts[t.category] || 0) + 1
   }
-  res.json(counts)
+  res.json({
+    counts,
+    definitions: CATEGORY_DEFINITIONS,
+    total: SERVICE_TEMPLATES.length,
+  })
 })
 
-api.get('/templates/:id', (req: Request, res: Response) => {
-  const tmpl = SERVICE_TEMPLATES.find((t) => t.id === req.params.id)
+api.get('/templates/:id/preflight', async (req: Request, res: Response) => {
+  const tmpl = getTemplateById(String(req.params.id))
   if (!tmpl) {
     res.status(404).json({ error: 'template not found' })
     return
   }
-  res.json(tmpl)
+  const preflight = await installerEngine.checkPreflight(
+    tmpl,
+    typeof req.query.name === 'string' ? req.query.name : undefined
+  )
+  res.json(preflight)
 })
 
-api.post('/templates/:id/deploy', async (req: Request, res: Response) => {
-  const tmpl = SERVICE_TEMPLATES.find((t) => t.id === req.params.id)
+api.get('/templates/:id', async (req: Request, res: Response) => {
+  const tmpl = getTemplateById(String(req.params.id))
   if (!tmpl) {
     res.status(404).json({ error: 'template not found' })
     return
   }
-  const firstPort = tmpl.ports[0] || ''
-  const [defaultHostStr] = firstPort.split(':')
-  const requestedPort = req.body?.hostPort ? Number(req.body.hostPort) : Number(defaultHostStr) || undefined
+  const [preflight] = await Promise.all([installerEngine.checkPreflight(tmpl)])
+  const installation = installerEngine.findByTemplateId(tmpl.id)
+  res.json({
+    ...tmpl,
+    preflight,
+    installation: installation ? serializeInstallation(installation) : null,
+  })
+})
+
+async function handleTemplateInstallRequest(req: Request, res: Response) {
+  const tmpl = getTemplateById(String(req.params.id))
+  if (!tmpl) {
+    res.status(404).json({ error: 'template not found' })
+    return
+  }
+  const requestedPort = req.body?.hostPort ? Number(req.body.hostPort) : tmpl.defaultPort
   const customName = String(req.body?.name || tmpl.id).trim() || tmpl.id
   const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
   if (customDomain && !isValidDomainName(customDomain)) {
@@ -1688,37 +1813,148 @@ api.post('/templates/:id/deploy', async (req: Request, res: Response) => {
     return
   }
 
+  let envObj: Record<string, string> = {}
+  if (Array.isArray(req.body?.env)) {
+    envObj = parseEnvMap(req.body.env)
+  } else if (req.body?.env && typeof req.body.env === 'object') {
+    for (const [k, v] of Object.entries(req.body.env)) {
+      envObj[String(k)] = String(v ?? '')
+    }
+  }
+
   try {
-    const deployed = await localRuntime.deployLocalApp({
+    const rec = await installerEngine.startInstallation({
+      template: tmpl,
       name: customName,
-      runtimeHint: `${tmpl.id} ${tmpl.image}`,
       hostPort: requestedPort,
-      env: parseEnvMap(Array.isArray(req.body?.env) ? req.body.env : tmpl.env_vars),
-      imageLabel: tmpl.name,
+      env: envObj,
+      overwrite: Boolean(req.body?.overwrite),
     })
     const proxyRoute = upsertAppProxyRoute(
-      deployed.name,
-      deployed.port,
+      rec.name,
+      rec.port,
       customDomain,
       Boolean(req.body?.autoDomain)
     )
+    const serialized = serializeInstallation(rec)
     res.json({
       template: tmpl.name,
+      installation: serialized,
       app: {
-        id: deployed.id,
-        name: deployed.name,
-        port: deployed.port,
-        runtime: deployed.runtime,
-        status: deployed.state,
+        id: rec.id,
+        name: rec.name,
+        port: rec.port,
+        runtime: rec.runtime,
+        status: rec.state,
       },
-      container: serializeLocalApp(deployed),
+      container: serialized,
       proxyRoute,
-      liveUrl: `/live/${deployed.name}/`,
-      logs: deployed.logs.slice(-10).map((l) => l.content),
+      liveUrl: `/live/${rec.name}/`,
+      logs: rec.logs.map((l) => l.content),
     })
   } catch (err) {
-    res.status(400).json({ error: (err as Error).message || 'Template launch failed' })
+    const e = err as Error & { statusCode?: number; code?: string; preflight?: unknown }
+    res.status(e.statusCode || 400).json({
+      error: e.message || 'Installation failed',
+      code: e.code,
+      preflight: e.preflight,
+    })
   }
+}
+
+api.post('/templates/:id/install', handleTemplateInstallRequest)
+api.post('/templates/:id/deploy', handleTemplateInstallRequest)
+
+api.get('/installations', (_req: Request, res: Response) => {
+  res.json(installerEngine.listAll().map(serializeInstallation))
+})
+
+api.get('/installations/:id', (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const rec = installerEngine.installations.get(id) || installerEngine.findByName(id) || installerEngine.findByTemplateId(id)
+  if (!rec) {
+    res.status(404).json({ error: 'installation not found' })
+    return
+  }
+  res.json(serializeInstallation(rec))
+})
+
+api.post('/installations/:id/start', async (req: Request, res: Response) => {
+  try {
+    const rec = await installerEngine.startApp(String(req.params.id))
+    if (!rec) {
+      res.status(404).json({ error: 'installation not found' })
+      return
+    }
+    res.json({ status: 'started', installation: serializeInstallation(rec) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to start app' })
+  }
+})
+
+api.post('/installations/:id/stop', async (req: Request, res: Response) => {
+  const rec = await installerEngine.stopApp(String(req.params.id))
+  if (!rec) {
+    res.status(404).json({ error: 'installation not found' })
+    return
+  }
+  res.json({ status: 'stopped', installation: serializeInstallation(rec) })
+})
+
+api.post('/installations/:id/restart', async (req: Request, res: Response) => {
+  try {
+    const rec = await installerEngine.restartApp(String(req.params.id))
+    if (!rec) {
+      res.status(404).json({ error: 'installation not found' })
+      return
+    }
+    res.json({ status: 'restarted', installation: serializeInstallation(rec) })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Failed to restart app' })
+  }
+})
+
+api.post('/installations/:id/health', async (req: Request, res: Response) => {
+  const health = await installerEngine.checkHealth(String(req.params.id))
+  if (!health) {
+    res.status(404).json({ error: 'installation not found' })
+    return
+  }
+  res.json(health)
+})
+
+api.put('/installations/:id/env', (req: Request, res: Response) => {
+  const envObj: Record<string, string> = {}
+  if (Array.isArray(req.body?.env)) {
+    Object.assign(envObj, parseEnvMap(req.body.env))
+  } else if (req.body?.env && typeof req.body.env === 'object') {
+    for (const [k, v] of Object.entries(req.body.env)) {
+      envObj[String(k)] = String(v ?? '')
+    }
+  }
+  const rec = installerEngine.updateEnv(String(req.params.id), envObj)
+  if (!rec) {
+    res.status(404).json({ error: 'installation not found' })
+    return
+  }
+  res.json({ installation: serializeInstallation(rec) })
+})
+
+api.delete('/installations/:id', async (req: Request, res: Response) => {
+  const id = String(req.params.id)
+  const rec = installerEngine.installations.get(id) || installerEngine.findByName(id)
+  if (!rec) {
+    res.status(404).json({ error: 'installation not found' })
+    return
+  }
+  const oldPort = rec.port
+  const keepData = req.query.keepData === 'true'
+  const outcome = await installerEngine.uninstall(rec.id, keepData)
+  store.proxyRoutes = store.proxyRoutes.filter(
+    (r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`
+  )
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  res.json({ status: 'uninstalled', ...outcome })
 })
 
 // ==================== GIT DEPLOY ====================

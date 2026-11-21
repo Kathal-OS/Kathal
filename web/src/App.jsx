@@ -14,6 +14,7 @@ import Databases from './pages/Databases'
 import FileManager from './pages/FileManager'
 import Backups from './pages/Backups'
 import Templates from './pages/Templates'
+import AppDetail from './pages/AppDetail'
 import GitDeploy from './pages/GitDeploy'
 import Terminal from './pages/Terminal'
 import Monitoring from './pages/Monitoring'
@@ -123,6 +124,7 @@ export default function App() {
             <Route path="/files" element={<ProtectedRoute token={token}><FileManager /></ProtectedRoute>} />
             <Route path="/backups" element={<ProtectedRoute token={token}><Backups /></ProtectedRoute>} />
             <Route path="/templates" element={<ProtectedRoute token={token}><Templates /></ProtectedRoute>} />
+            <Route path="/templates/:id" element={<ProtectedRoute token={token}><AppDetail /></ProtectedRoute>} />
             <Route path="/git" element={<ProtectedRoute token={token}><GitDeploy /></ProtectedRoute>} />
             <Route path="/terminal" element={<ProtectedRoute token={token}><Terminal /></ProtectedRoute>} />
             <Route path="/monitoring" element={<ProtectedRoute token={token}><Monitoring /></ProtectedRoute>} />

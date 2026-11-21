@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-21T21:55:51.215Z",
+  "updatedAt": "2026-11-21T22:25:31.713Z",
   "settings": {
     "serverDomain": "kathal.local",
     "wildcardDomain": "apps.kathal.local",
@@ -8,5 +8,16 @@
     "autoSsl": true,
     "forceHttps": true
   },
-  "routes": []
+  "routes": [
+    {
+      "id": "proxy-5936b8d7",
+      "domain": "wordpress.apps.kathal.local",
+      "target": "http://127.0.0.1:9002",
+      "targetHost": "127.0.0.1",
+      "localPort": 9002,
+      "port": 443,
+      "ssl": true,
+      "enabled": true
+    }
+  ]
 }

@@ -25,7 +25,9 @@ const ROUTE_META = {
 
 export default function TopBar({ onOpenMobileNav, onOpenQuickLaunch }) {
   const location = useLocation()
-  const meta = ROUTE_META[location.pathname] || ROUTE_META['/']
+  const meta =
+    ROUTE_META[location.pathname] ||
+    (location.pathname.startsWith('/templates/') ? ROUTE_META['/templates'] : ROUTE_META['/'])
 
   return (
     <header className="h-16 px-4 sm:px-8 border-b border-slate-800/80 bg-[#0D121C]/90 backdrop-blur-sm flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30">
