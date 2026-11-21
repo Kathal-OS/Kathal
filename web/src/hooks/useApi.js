@@ -1,11 +1,51 @@
 import { useState, useEffect } from 'react'
 
+// Session token is held strictly in JS memory (never localStorage/sessionStorage)
+let memoryToken = null
+let unauthorizedHandler = null
+
+export function setAuthToken(token) {
+  memoryToken = token || null
+}
+
+export function getAuthToken() {
+  return memoryToken
+}
+
+export function clearAuthToken() {
+  memoryToken = null
+}
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = typeof handler === 'function' ? handler : null
+}
+
 function buildApiUrl(path) {
   if (path.startsWith('/api/v1')) return path
   return '/api/v1' + (path.startsWith('/') ? path : '/' + path)
 }
 
-// useApi fetches a GET endpoint with JWT auth from localStorage.
+function notifyIfSessionInvalid(status, errorMessage) {
+  if (status !== 401) return
+  const msg = String(errorMessage || '').toLowerCase()
+  if (!msg || msg === 'invalid token' || msg === 'unauthorized') {
+    memoryToken = null
+    if (unauthorizedHandler) {
+      unauthorizedHandler('Your session expired or the server restarted. Please sign in again.')
+    }
+  }
+}
+
+async function parseErrorBody(res) {
+  try {
+    const data = await res.json()
+    return data?.error || ''
+  } catch {
+    return ''
+  }
+}
+
+// useApi fetches a GET endpoint with in-memory Bearer auth.
 // Returns { data, loading, error } and re-fetches when the path changes.
 export function useApi(path) {
   const [data, setData] = useState(null)
@@ -16,17 +56,20 @@ export function useApi(path) {
     let cancelled = false
     setLoading(true)
 
-    const token = localStorage.getItem('kathal_token')
     const headers = {}
-    if (token) headers['Authorization'] = 'Bearer ' + token
+    if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
 
     fetch(buildApiUrl(path), { headers })
-      .then(res => {
-        if (!res.ok) throw new Error('HTTP ' + res.status)
+      .then(async (res) => {
+        if (!res.ok) {
+          const serverErr = await parseErrorBody(res)
+          notifyIfSessionInvalid(res.status, serverErr)
+          throw new Error(serverErr || 'HTTP ' + res.status)
+        }
         return res.json()
       })
-      .then(json => { if (!cancelled) setData(json) })
-      .catch(err => { if (!cancelled) setError(err.message) })
+      .then((json) => { if (!cancelled) setData(json) })
+      .catch((err) => { if (!cancelled) setError(err.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
@@ -36,49 +79,59 @@ export function useApi(path) {
 }
 
 export async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem('kathal_token')
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (token) headers['Authorization'] = 'Bearer ' + token
+  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
 
   const res = await fetch(buildApiUrl(path), { ...options, headers })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    notifyIfSessionInvalid(res.status, data?.error)
+    throw new Error(data.error || 'HTTP ' + res.status)
+  }
   return data
 }
 
 export async function apiFetchBlob(path, options = {}) {
-  const token = localStorage.getItem('kathal_token')
   const headers = { ...options.headers }
-  if (token) headers['Authorization'] = 'Bearer ' + token
+  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
 
   const res = await fetch(buildApiUrl(path), { ...options, headers })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) {
+    const serverErr = await parseErrorBody(res)
+    notifyIfSessionInvalid(res.status, serverErr)
+    throw new Error(serverErr || 'HTTP ' + res.status)
+  }
   return res.blob()
 }
 
 export async function apiFetchText(path, options = {}) {
-  const token = localStorage.getItem('kathal_token')
   const headers = { ...options.headers }
-  if (token) headers['Authorization'] = 'Bearer ' + token
+  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
 
   const res = await fetch(buildApiUrl(path), { ...options, headers })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
+  if (!res.ok) {
+    const serverErr = await parseErrorBody(res)
+    notifyIfSessionInvalid(res.status, serverErr)
+    throw new Error(serverErr || 'HTTP ' + res.status)
+  }
   return res.text()
 }
 
 export async function apiPostFormData(path, formData, options = {}) {
-  const token = localStorage.getItem('kathal_token')
   const headers = { ...options.headers }
-  if (token) headers['Authorization'] = 'Bearer ' + token
+  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
 
   const res = await fetch(buildApiUrl(path), {
     ...options,
     method: 'POST',
     headers,
-    body: formData
+    body: formData,
   })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    notifyIfSessionInvalid(res.status, data?.error)
+    throw new Error(data.error || 'HTTP ' + res.status)
+  }
   return data
 }
 

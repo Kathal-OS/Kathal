@@ -16,9 +16,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3000
 const VERSION = process.env.KATHAL_VERSION || '0.1.0'
 const ADMIN_EMAIL = (process.env.KATHAL_ADMIN_EMAIL || 'admin@kathal.local').toLowerCase()
-const ADMIN_PASSWORD = process.env.KATHAL_ADMIN_PASSWORD || 'kathal'
-const ADMIN_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10)
+const CONFIGURED_ADMIN_PASSWORD = (process.env.KATHAL_ADMIN_PASSWORD || '').trim()
+const CONFIGURED_ADMIN_HASH = CONFIGURED_ADMIN_PASSWORD
+  ? bcrypt.hashSync(CONFIGURED_ADMIN_PASSWORD, 10)
+  : null
 const JWT_SECRET = process.env.KATHAL_JWT_SECRET || crypto.randomBytes(32).toString('hex')
+
+let claimedAdmin: { email: string; passwordHash: string } | null = null
 
 const store = new MemoryStore()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
@@ -55,13 +59,15 @@ interface AuthRequest extends Request {
   user?: { id: string; email: string; role: string }
 }
 
+const PUBLIC_API_PATHS = new Set(['/login', '/health', '/auth/status', '/auth/setup'])
+
 function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
-  if (req.path === '/login' || req.path === '/health') {
+  if (PUBLIC_API_PATHS.has(req.path)) {
     next()
     return
   }
   const authHeader = req.headers.authorization || ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
   if (!token) {
     res.status(401).json({ error: 'unauthorized' })
     return
@@ -83,6 +89,45 @@ api.use(authMiddleware)
 
 // ==================== AUTH & HEALTH ====================
 
+api.get('/auth/status', (_req: Request, res: Response) => {
+  const needsSetup = !CONFIGURED_ADMIN_HASH && !claimedAdmin
+  res.json({
+    needsSetup,
+    adminEmail: CONFIGURED_ADMIN_HASH ? ADMIN_EMAIL : claimedAdmin?.email || ADMIN_EMAIL,
+  })
+})
+
+api.post('/auth/setup', async (req: Request, res: Response) => {
+  if (CONFIGURED_ADMIN_HASH || claimedAdmin) {
+    res.status(409).json({ error: 'Admin account is already configured. Please sign in.' })
+    return
+  }
+  const email = String(req.body?.email || '').trim().toLowerCase()
+  const password = String(req.body?.password || '')
+  if (!email || !email.includes('@')) {
+    res.status(400).json({ error: 'Please enter a valid email address.' })
+    return
+  }
+  if (password.length < 6 || password.length > 128) {
+    res.status(400).json({ error: 'Password must be between 6 and 128 characters.' })
+    return
+  }
+  const passwordHash = await bcrypt.hash(password, 10)
+  // Double-check after async hash to ensure one-time atomic claim
+  if (CONFIGURED_ADMIN_HASH || claimedAdmin) {
+    res.status(409).json({ error: 'Admin account is already configured. Please sign in.' })
+    return
+  }
+  claimedAdmin = { email, passwordHash }
+  const user = { id: 'admin', email, role: 'admin' }
+  const token = jwt.sign(user, JWT_SECRET, { expiresIn: '72h' })
+  res.json({ token, user })
+})
+
+api.get('/auth/session', (req: AuthRequest, res: Response) => {
+  res.json({ user: req.user })
+})
+
 api.post('/login', async (req: Request, res: Response) => {
   const email = String(req.body?.email || '').trim().toLowerCase()
   const password = String(req.body?.password || '')
@@ -90,18 +135,27 @@ api.post('/login', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'email and password are required' })
     return
   }
+  if (!CONFIGURED_ADMIN_HASH && !claimedAdmin) {
+    res.status(403).json({
+      error: 'Admin account has not been set up yet. Complete first-time setup first.',
+      needsSetup: true,
+    })
+    return
+  }
   if (!canAttemptLogin(email)) {
     res.status(429).json({ error: 'too many failed attempts, try again later' })
     return
   }
-  const valid = email === ADMIN_EMAIL && (await bcrypt.compare(password, ADMIN_HASH))
+  const expectedEmail = CONFIGURED_ADMIN_HASH ? ADMIN_EMAIL : claimedAdmin!.email
+  const expectedHash = CONFIGURED_ADMIN_HASH || claimedAdmin!.passwordHash
+  const valid = email === expectedEmail && (await bcrypt.compare(password, expectedHash))
   if (!valid) {
     recordLoginFailure(email)
     res.status(401).json({ error: 'invalid credentials' })
     return
   }
   loginAttempts.delete(email)
-  const user = { id: 'admin', email: ADMIN_EMAIL, role: 'admin' }
+  const user = { id: 'admin', email: expectedEmail, role: 'admin' }
   const token = jwt.sign(user, JWT_SECRET, { expiresIn: '72h' })
   res.json({ token, user })
 })

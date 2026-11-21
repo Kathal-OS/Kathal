@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
@@ -22,6 +22,7 @@ import Network from './pages/Network'
 import Volumes from './pages/Volumes'
 import Registries from './pages/Registries'
 import Settings from './pages/Settings'
+import { setAuthToken, clearAuthToken, setUnauthorizedHandler } from './hooks/useApi'
 
 function ProtectedRoute({ children, token }) {
   if (!token) return <Navigate to="/login" replace />
@@ -29,48 +30,53 @@ function ProtectedRoute({ children, token }) {
 }
 
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('kathal_token'))
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('kathal_user')
-      return saved ? JSON.parse(saved) : null
-    } catch {
-      return null
-    }
-  })
+  const [token, setToken] = useState(null)
+  const [user, setUser] = useState(null)
+  const [sessionNotice, setSessionNotice] = useState('')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [quickLaunchOpen, setQuickLaunchOpen] = useState(false)
   const [deploySignal, setDeploySignal] = useState(0)
 
-  useEffect(() => {
-    const savedToken = localStorage.getItem('kathal_token')
-    const savedUser = localStorage.getItem('kathal_user')
-    if (savedToken) {
-      setToken(savedToken)
-      try {
-        setUser(JSON.parse(savedUser))
-      } catch {
-        // ignore invalid user payload
-      }
-    }
+  const handleUnauthorized = useCallback((message) => {
+    clearAuthToken()
+    setToken(null)
+    setUser(null)
+    if (message) setSessionNotice(message)
   }, [])
 
+  useEffect(() => {
+    // Purge any legacy browser storage tokens so stale JWTs never cause invalid-token errors
+    try {
+      localStorage.removeItem('kathal_token')
+      localStorage.removeItem('kathal_user')
+    } catch {
+      // ignore storage access issues
+    }
+    setUnauthorizedHandler(handleUnauthorized)
+    return () => setUnauthorizedHandler(null)
+  }, [handleUnauthorized])
+
   function handleLogin(newToken, newUser) {
+    setAuthToken(newToken)
     setToken(newToken)
     setUser(newUser)
+    setSessionNotice('')
   }
 
   function handleLogout() {
-    localStorage.removeItem('kathal_token')
-    localStorage.removeItem('kathal_user')
+    clearAuthToken()
     setToken(null)
     setUser(null)
+    setSessionNotice('')
   }
 
   if (!token) {
     return (
       <Routes>
-        <Route path="/login" element={<Login onLogin={handleLogin} />} />
+        <Route
+          path="/login"
+          element={<Login onLogin={handleLogin} sessionNotice={sessionNotice} />}
+        />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { apiFetch, apiPost } from '../hooks/useApi'
+import { apiFetch, apiPost, getAuthToken } from '../hooks/useApi'
 
 export default function Terminal() {
   const termContainerRef = useRef(null)
@@ -87,14 +87,14 @@ export default function Terminal() {
     cleanup()
     setError(null)
     try {
-      const token = localStorage.getItem('kathal_token')
       const result = await apiPost('/terminal/sessions', { cols: 120, rows: 30 })
+      const token = getAuthToken() || ''
       const id = result.id || result.session_id
       sessionIdRef.current = id
       setSessionId(id)
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?token=${token}`
+      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?token=${encodeURIComponent(token)}`
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
