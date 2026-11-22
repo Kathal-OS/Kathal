@@ -412,9 +412,15 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
           </div>
           <div>
             <p className="text-xs text-slate-400 mb-1">Release Repository</p>
-            <p className="font-medium text-sm font-mono text-green-400">
-              {updateInfo?.repository || 'kathal-os/kathal'}
-            </p>
+            <a
+              href={`https://github.com/${updateInfo?.repository || 'Kathal-OS/Kathal'}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-sm font-mono text-green-400 hover:text-green-300 inline-flex items-center gap-1"
+            >
+              <span>{updateInfo?.repository || 'Kathal-OS/Kathal'}</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
         </div>
 

@@ -75,7 +75,7 @@
 ### Windows (PowerShell)
 
 ```powershell
-git clone <your-repo-url> kathal-os
+git clone https://github.com/Kathal-OS/Kathal.git kathal-os
 cd kathal-os
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 npm run dev
@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -RegisterStartupTas
 ### macOS
 
 ```bash
-git clone <your-repo-url> kathal-os
+git clone https://github.com/Kathal-OS/Kathal.git kathal-os
 cd kathal-os
 bash scripts/install-mac.sh
 npm run dev
@@ -107,7 +107,7 @@ KATHAL_INSTALL_LAUNCHD=1 bash scripts/install-mac.sh
 ### Linux
 
 ```bash
-git clone <your-repo-url> kathal-os
+git clone https://github.com/Kathal-OS/Kathal.git kathal-os
 cd kathal-os
 bash scripts/install.sh
 npm run dev
@@ -274,7 +274,7 @@ Copy `.env.example` to `.env` (or export variables in your shell/service) to cus
 | :--- | :--- | :--- |
 | `PORT` | `3000` | HTTP and WebSocket server port (binds to `0.0.0.0`) |
 | `KATHAL_VERSION` | `0.1.0` | Reported platform version (compared against GitHub Releases API) |
-| `KATHAL_GITHUB_REPO` | `kathal-os/kathal` | GitHub `owner/repo` slug used by the auto-update checker |
+| `KATHAL_GITHUB_REPO` | `Kathal-OS/Kathal` | GitHub `owner/repo` slug used by the auto-update checker |
 | `KATHAL_ADMIN_EMAIL` | `admin@kathal.local` | Default administrator login email |
 | `KATHAL_ADMIN_PASSWORD` | *(empty — UI setup)* | Optional pre-set admin password; leave blank to set via `/login` on first run |
 | `KATHAL_JWT_SECRET` | *(random 32-byte hex)* | Secret for signing local JWT session tokens |
@@ -364,6 +364,24 @@ Stop any running KATHAL server or installed services, then remove the optional s
   sudo systemctl daemon-reload
   ```
 - **Remove app & data files**: Delete your `kathal-os` directory (and `KATHAL_DATA_DIR` / `KATHAL_APPS_DIR` if customized).
+
+---
+
+## Official Kathal-OS Ecosystem
+
+Built under the [**Kathal-OS**](https://github.com/Kathal-OS) organization (BakeWeb & SunDial Technology):
+
+| Repository | Link | Focus |
+| :--- | :--- | :--- |
+| **Kathal** | [Kathal-OS/Kathal](https://github.com/Kathal-OS/Kathal) | Core self-hosted hosting & development infrastructure control panel |
+| **Kathal-CLI** | [Kathal-OS/Kathal-CLI](https://github.com/Kathal-OS/Kathal-CLI) | Command-line interface for managing KATHAL deployments & hosts |
+| **OLL-Market** | [Kathal-OS/OLL-Market](https://github.com/Kathal-OS/OLL-Market) | Open application & module marketplace ecosystem |
+| **kathal-plugins** | [Kathal-OS/kathal-plugins](https://github.com/Kathal-OS/kathal-plugins) | Official plugin collection for extending KATHAL OS |
+| **kathal-plugins-sdk** | [Kathal-OS/kathal-plugins-sdk](https://github.com/Kathal-OS/kathal-plugins-sdk) | SDK and tooling for building custom KATHAL plugins |
+| **kathal-ci** | [Kathal-OS/kathal-ci](https://github.com/Kathal-OS/kathal-ci) | Continuous integration & release automation pipelines |
+| **kathal-docs** | [Kathal-OS/kathal-docs](https://github.com/Kathal-OS/kathal-docs) | Official documentation site and user guides |
+| **kathal-examples** | [Kathal-OS/kathal-examples](https://github.com/Kathal-OS/kathal-examples) | Sample application stacks, templates, and starter configs |
+| **.github** | [Kathal-OS/.github](https://github.com/Kathal-OS/.github) | Organization profile and community health files |
 
 ---
 

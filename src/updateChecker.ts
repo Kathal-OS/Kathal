@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
-const DEFAULT_GITHUB_REPO = 'kathal-os/kathal'
+const DEFAULT_GITHUB_REPO = 'Kathal-OS/Kathal'
 const REPO_SLUG_REGEX = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const CACHE_TTL_MS = 15 * 60 * 1000
 const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -25,6 +25,7 @@ export interface UpdateCheckResult {
   repository: string
   releaseName: string | null
   releaseUrl: string | null
+  releaseSource: 'release' | 'tag' | null
   publishedAt: string | null
   releaseNotes: string | null
   prerelease: boolean
@@ -368,6 +369,7 @@ export class UpdateChecker {
       | 'githubStatus'
       | 'releaseName'
       | 'releaseUrl'
+      | 'releaseSource'
       | 'publishedAt'
       | 'releaseNotes'
       | 'prerelease'
@@ -415,6 +417,7 @@ export class UpdateChecker {
           githubStatus: 'ok',
           releaseName: typeof release.name === 'string' && release.name.trim() ? release.name.trim() : `v${latestVersion}`,
           releaseUrl,
+          releaseSource: 'release',
           publishedAt: typeof release.published_at === 'string' ? release.published_at : null,
           releaseNotes: sanitizeReleaseNotes(release.body),
           prerelease,
@@ -422,6 +425,39 @@ export class UpdateChecker {
           message: updateAvailable
             ? `New version v${latestVersion} is available on GitHub (running v${currentVersion} from ${versionSource}).`
             : `KATHAL OS v${currentVersion} (${versionSource}) matches the latest GitHub release (v${latestVersion}).`,
+        }
+      }
+
+      // Fallback to GitHub Tags API when repository publishes tags before formal Releases
+      if (finalStatusCode === 200 || finalStatusCode === 404) {
+        const tagsResp = await fetchGithubJson(`/repos/${repository}/tags?per_page=1`, ua)
+        if (tagsResp.statusCode === 200 && Array.isArray(tagsResp.body) && tagsResp.body.length > 0) {
+          const topTag = tagsResp.body[0] as { name?: string }
+          if (topTag && typeof topTag.name === 'string' && topTag.name.trim()) {
+            const rawTag = topTag.name.trim()
+            const latestVersion = normalizeVersion(rawTag)
+            const updateAvailable = compareSemver(latestVersion, currentVersion) > 0
+            const tagUrl = sanitizeGithubReleaseUrl(
+              `https://github.com/${repository}/releases/tag/${encodeURIComponent(rawTag)}`
+            )
+            return {
+              ...baseResult,
+              latestVersion,
+              updateAvailable,
+              status: updateAvailable ? 'update-available' : 'up-to-date',
+              githubStatus: 'ok',
+              releaseName: rawTag,
+              releaseUrl: tagUrl,
+              releaseSource: 'tag',
+              publishedAt: null,
+              releaseNotes: null,
+              prerelease: rawTag.includes('-'),
+              channel: rawTag.includes('-') ? 'prerelease' : 'stable',
+              message: updateAvailable
+                ? `New version v${latestVersion} (${rawTag}) is available on GitHub (running v${currentVersion} from ${versionSource}).`
+                : `KATHAL OS v${currentVersion} (${versionSource}) is up to date with GitHub tag ${rawTag}.`,
+            }
+          }
         }
       }
 
@@ -434,6 +470,7 @@ export class UpdateChecker {
           githubStatus: 'rate_limited',
           releaseName: null,
           releaseUrl: null,
+          releaseSource: null,
           publishedAt: null,
           releaseNotes: null,
           prerelease: false,
@@ -451,11 +488,12 @@ export class UpdateChecker {
           githubStatus: 'not_found',
           releaseName: null,
           releaseUrl: null,
+          releaseSource: null,
           publishedAt: null,
           releaseNotes: null,
           prerelease: false,
           channel: 'stable',
-          message: `No published GitHub releases found for ${repository}. Running local v${currentVersion} (${versionSource}).`,
+          message: `No published GitHub releases or tags found for ${repository}. Running local v${currentVersion} (${versionSource}).`,
         }
       }
 
@@ -467,6 +505,7 @@ export class UpdateChecker {
         githubStatus: 'error',
         releaseName: null,
         releaseUrl: null,
+        releaseSource: null,
         publishedAt: null,
         releaseNotes: null,
         prerelease: false,
@@ -482,6 +521,7 @@ export class UpdateChecker {
         githubStatus: 'offline',
         releaseName: null,
         releaseUrl: null,
+        releaseSource: null,
         publishedAt: null,
         releaseNotes: null,
         prerelease: false,
