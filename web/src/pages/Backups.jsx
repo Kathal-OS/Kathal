@@ -75,12 +75,27 @@ export default function Backups() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'kathal-export-' + new Date().toISOString().slice(0, 10) + '.zip'
+      a.download = 'kathal-backup-' + new Date().toISOString().slice(0, 10) + '.zip'
       a.click()
       URL.revokeObjectURL(url)
-      setFeedback({ type: 'success', text: 'Exported KATHAL configuration archive.' })
+      setFeedback({ type: 'success', text: 'Exported compressed ZIP archive of service registry & app configs.' })
     } catch (err) {
       setFeedback({ type: 'error', text: err.message || 'Export failed' })
+    }
+  }
+
+  async function handleDownloadSnapshot(b) {
+    setFeedback(null)
+    try {
+      const blob = await apiFetchBlob('/backups/' + encodeURIComponent(b.id) + '/download')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = (b.name || b.id) + '.zip'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Download failed' })
     }
   }
 
@@ -106,7 +121,7 @@ export default function Backups() {
         <div>
           <h1 className="text-3xl font-bold text-slate-100">Backup &amp; Restore</h1>
           <p className="text-slate-400 text-sm mt-1">
-            Save snapshots of your apps and settings, restore earlier states, or download an offline copy.
+            Export your service registry, reverse proxy routes, and application configuration files as a compressed ZIP archive.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
@@ -115,7 +130,7 @@ export default function Backups() {
             className="inline-flex items-center gap-1.5 bg-[#101A10] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
           >
             <Download className="w-4 h-4 text-slate-400" />
-            <span>Export All</span>
+            <span>Export ZIP</span>
           </button>
           <label className="inline-flex items-center gap-1.5 bg-[#101A10] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm cursor-pointer whitespace-nowrap transition-colors">
             <Upload className="w-4 h-4 text-slate-400" />
@@ -192,10 +207,20 @@ export default function Backups() {
                   <p className="font-semibold text-slate-100">{b.name || b.id}</p>
                   <p className="text-xs text-slate-400 tabular-nums mt-0.5">
                     {b.created_at ? new Date(b.created_at).toLocaleString() : 'Unknown date'} · {b.size || 'Unknown size'}
+                    {b.entryCount ? ` · ${b.entryCount} files` : ''}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {b.archiveAvailable && (
+                  <button
+                    onClick={() => handleDownloadSnapshot(b)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>ZIP</span>
+                  </button>
+                )}
                 {confirmRestoreId === b.id ? (
                   <>
                     <button

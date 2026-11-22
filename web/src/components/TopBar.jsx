@@ -1,5 +1,6 @@
-import { useLocation } from 'react-router-dom'
-import { Menu, Rocket } from 'lucide-react'
+import { useState } from 'react'
+import { useLocation, Link } from 'react-router-dom'
+import { Menu, Rocket, ArrowUpCircle, X } from 'lucide-react'
 
 const ROUTE_META = {
   '/': { section: 'Overview', title: 'Dashboard', hint: 'Server health, running apps, and quick actions' },
@@ -23,11 +24,16 @@ const ROUTE_META = {
   '/settings': { section: 'System & Diagnostics', title: 'Settings', hint: 'Domain defaults, SSL, alerts, and deployment rules' },
 }
 
-export default function TopBar({ onOpenMobileNav, onOpenQuickLaunch }) {
+export default function TopBar({ onOpenMobileNav, onOpenQuickLaunch, updateInfo }) {
   const location = useLocation()
+  const [dismissedVersion, setDismissedVersion] = useState(null)
   const meta =
     ROUTE_META[location.pathname] ||
     (location.pathname.startsWith('/templates/') ? ROUTE_META['/templates'] : ROUTE_META['/'])
+
+  const showUpdateNotice =
+    Boolean(updateInfo?.updateAvailable && updateInfo?.latestVersion) &&
+    dismissedVersion !== updateInfo.latestVersion
 
   return (
     <header className="h-16 px-4 sm:px-8 border-b border-slate-800/80 bg-[#0A100A]/90 backdrop-blur-sm flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30">
@@ -51,14 +57,33 @@ export default function TopBar({ onOpenMobileNav, onOpenQuickLaunch }) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onOpenQuickLaunch}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-kathal-600 hover:bg-kathal-500 text-white text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
-      >
-        <Rocket className="w-4 h-4" />
-        <span>Launch App</span>
-      </button>
+      <div className="flex items-center gap-3 shrink-0">
+        {showUpdateNotice && (
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-yellow-500/15 border border-yellow-500/35 text-yellow-300 text-xs">
+            <ArrowUpCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+            <Link to="/settings" className="font-medium hover:text-yellow-200 whitespace-nowrap">
+              Update v{updateInfo.latestVersion} available
+            </Link>
+            <button
+              type="button"
+              onClick={() => setDismissedVersion(updateInfo.latestVersion)}
+              aria-label="Dismiss update notification"
+              className="p-0.5 rounded hover:bg-yellow-500/20 text-yellow-400/80 hover:text-yellow-200"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onOpenQuickLaunch}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-kathal-600 hover:bg-kathal-500 text-white text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
+        >
+          <Rocket className="w-4 h-4" />
+          <span>Launch App</span>
+        </button>
+      </div>
     </header>
   )
 }

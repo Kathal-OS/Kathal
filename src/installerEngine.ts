@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
 import crypto from 'node:crypto'
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { execFile, type ChildProcess } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
   sanitizeAppName,
@@ -13,9 +13,23 @@ import {
 } from './localRuntime.ts'
 import {
   sanitizeProcessEnv,
-  samplePidResourceMetrics,
   formatProcessUptime,
 } from './nativeProcess.ts'
+import {
+  getPlatformLabel,
+  getPlatformBinaryCandidates,
+  findExecutableOnPath,
+  resolveNpmInvocation,
+  resolveNpmBinEntrypoint,
+  resolvePythonCommand,
+  getVenvPaths,
+  spawnCrossPlatform,
+  terminateProcessTree,
+  samplePidMetricsCrossPlatform,
+  detectArchiveType,
+  downloadHttpsFile,
+  extractArchiveCrossPlatform,
+} from './platform.ts'
 import { getTemplateById, type ServiceTemplate } from './templates.ts'
 import type { ServiceManager } from './serviceManager.ts'
 
@@ -40,6 +54,7 @@ export interface RuntimeProbeItem {
 
 export interface HostRuntimesReport {
   platform: string
+  platformLabel: string
   arch: string
   checkedAt: string
   runtimes: Record<string, RuntimeProbeItem>
@@ -111,20 +126,11 @@ let cachedRuntimes: { expiresAt: number; report: HostRuntimesReport } | null = n
 
 async function probeBinary(cmd: string, args: string[] = ['--version']): Promise<{ ok: boolean; version: string | null }> {
   try {
-    const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 2500 })
+    const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 3000, windowsHide: true })
     const line = `${stdout}\n${stderr}`.trim().split(/\r?\n/)[0] || ''
     return { ok: true, version: line.slice(0, 80) || 'installed' }
   } catch {
     return { ok: false, version: null }
-  }
-}
-
-async function whichExists(bin: string): Promise<boolean> {
-  try {
-    await execFileAsync('which', [bin], { timeout: 1500 })
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -133,6 +139,9 @@ export async function detectHostRuntimes(forceRefresh = false): Promise<HostRunt
     return cachedRuntimes.report
   }
 
+  const npmInv = resolveNpmInvocation(['--version'])
+  const pyCmd = resolvePythonCommand()
+
   const [
     npmProbe,
     pyProbe,
@@ -140,67 +149,73 @@ export async function detectHostRuntimes(forceRefresh = false): Promise<HostRunt
     pipProbe,
     gitProbe,
     curlProbe,
-    tarExists,
-    unzipExists,
-    bzip2Exists,
     goProbe,
     javaProbe,
     phpProbe,
     dockerProbe,
     dotnetProbe,
-    postgresExists,
-    mysqlExists,
-    mariadbExists,
-    mongoExists,
-    redisExists,
-    nginxExists,
-    ollamaExists,
-    mosquittoExists,
   ] = await Promise.all([
-    probeBinary('npm', ['--version']),
-    probeBinary('python3', ['--version']),
-    probeBinary('python3', ['-c', 'import venv, ensurepip; print("venv+ensurepip")']),
-    probeBinary('python3', ['-m', 'pip', '--version']),
-    probeBinary('git', ['--version']),
-    probeBinary('curl', ['--version']),
-    whichExists('tar'),
-    whichExists('unzip'),
-    whichExists('bzip2'),
-    probeBinary('go', ['version']),
-    probeBinary('java', ['-version']),
-    probeBinary('php', ['-v']),
-    probeBinary('docker', ['--version']),
-    probeBinary('dotnet', ['--version']),
-    whichExists('postgres'),
-    whichExists('mysqld'),
-    whichExists('mariadbd'),
-    whichExists('mongod'),
-    whichExists('redis-server'),
-    whichExists('nginx'),
-    whichExists('ollama'),
-    whichExists('mosquitto'),
+    probeBinary(npmInv.executable, npmInv.args),
+    probeBinary(pyCmd.executable, [...pyCmd.prefixArgs, '--version']),
+    probeBinary(pyCmd.executable, [...pyCmd.prefixArgs, '-c', 'import venv, ensurepip; print("venv+ensurepip")']),
+    probeBinary(pyCmd.executable, [...pyCmd.prefixArgs, '-m', 'pip', '--version']),
+    probeBinary(findExecutableOnPath('git') || 'git', ['--version']),
+    probeBinary(findExecutableOnPath('curl') || 'curl', ['--version']),
+    probeBinary(findExecutableOnPath('go') || 'go', ['version']),
+    probeBinary(findExecutableOnPath('java') || 'java', ['-version']),
+    probeBinary(findExecutableOnPath('php') || 'php', ['-v']),
+    probeBinary(findExecutableOnPath('docker') || 'docker', ['--version']),
+    probeBinary(findExecutableOnPath('dotnet') || 'dotnet', ['--version']),
   ])
+
+  const tarExists = Boolean(findExecutableOnPath('tar'))
+  const powershellExists = process.platform === 'win32' && Boolean(findExecutableOnPath('powershell'))
+  const unzipExists =
+    process.platform === 'win32'
+      ? powershellExists
+      : Boolean(findExecutableOnPath('unzip') || tarExists)
+  const bzip2Exists = Boolean(findExecutableOnPath('bzip2'))
+  const postgresExists = Boolean(findExecutableOnPath('postgres'))
+  const mysqlExists = Boolean(findExecutableOnPath('mysqld'))
+  const mariadbExists = Boolean(findExecutableOnPath('mariadbd'))
+  const mongoExists = Boolean(findExecutableOnPath('mongod'))
+  const redisExists = Boolean(findExecutableOnPath('redis-server'))
+  const nginxExists = Boolean(findExecutableOnPath('nginx'))
+  const ollamaExists = Boolean(findExecutableOnPath('ollama'))
+  const mosquittoExists = Boolean(findExecutableOnPath('mosquitto'))
 
   const runtimes: Record<string, RuntimeProbeItem> = {
     node: { id: 'node', label: 'Node.js', available: true, version: process.version, detail: `Runtime ${process.version}` },
     npm: { id: 'npm', label: 'npm', available: npmProbe.ok, version: npmProbe.version, detail: npmProbe.ok ? `npm v${npmProbe.version}` : 'npm not found' },
-    python3: { id: 'python3', label: 'Python 3', available: pyProbe.ok, version: pyProbe.version, detail: pyProbe.ok ? pyProbe.version || 'available' : 'python3 not found' },
+    python3: { id: 'python3', label: 'Python 3', available: pyProbe.ok, version: pyProbe.version, detail: pyProbe.ok ? pyProbe.version || 'available' : 'Python 3 not found' },
     pythonVenv: {
       id: 'pythonVenv',
       label: 'Python venv & pip',
       available: pyVenvProbe.ok && pipProbe.ok,
       version: pipProbe.version,
-      detail: pyVenvProbe.ok && pipProbe.ok ? 'venv + ensurepip ready' : 'python3-venv / pip package missing on host',
+      detail: pyVenvProbe.ok && pipProbe.ok ? 'venv + ensurepip ready' : 'python venv / pip missing on host',
     },
     git: { id: 'git', label: 'Git', available: gitProbe.ok, version: gitProbe.version, detail: gitProbe.ok ? gitProbe.version || 'available' : 'git not found' },
-    curl: { id: 'curl', label: 'curl (HTTPS)', available: curlProbe.ok, version: curlProbe.version, detail: curlProbe.ok ? 'HTTPS downloads ready' : 'curl missing' },
+    curl: {
+      id: 'curl',
+      label: 'HTTPS Fetch',
+      available: true,
+      version: curlProbe.ok ? curlProbe.version : `Node ${process.version}`,
+      detail: 'Built-in Node HTTPS downloader ready',
+    },
     tar: { id: 'tar', label: 'tar', available: tarExists, version: tarExists ? 'installed' : null, detail: tarExists ? 'tar extractor available' : 'tar missing' },
-    unzip: { id: 'unzip', label: 'unzip', available: unzipExists, version: unzipExists ? 'installed' : null, detail: unzipExists ? 'zip extractor available' : 'unzip missing' },
+    unzip: {
+      id: 'unzip',
+      label: process.platform === 'win32' ? 'PowerShell Expand-Archive' : 'unzip / tar',
+      available: unzipExists,
+      version: unzipExists ? 'installed' : null,
+      detail: unzipExists ? 'zip extractor available' : 'zip extractor missing',
+    },
     bzip2: { id: 'bzip2', label: 'bzip2', available: bzip2Exists, version: bzip2Exists ? 'installed' : null, detail: bzip2Exists ? 'bzip2 extractor available' : 'bzip2 missing' },
     go: { id: 'go', label: 'Go Toolchain', available: goProbe.ok, version: goProbe.version, detail: goProbe.ok ? goProbe.version || 'installed' : 'Go compiler not installed' },
     java: { id: 'java', label: 'Java JDK/JRE', available: javaProbe.ok, version: javaProbe.version, detail: javaProbe.ok ? javaProbe.version || 'installed' : 'Java 17+ runtime not installed' },
     php: { id: 'php', label: 'PHP', available: phpProbe.ok, version: phpProbe.version, detail: phpProbe.ok ? phpProbe.version || 'installed' : 'PHP 8.2+ not installed' },
-    docker: { id: 'docker', label: 'Docker Engine', available: dockerProbe.ok, version: dockerProbe.version, detail: dockerProbe.ok ? dockerProbe.version || 'installed' : 'Docker daemon not installed' },
+    docker: { id: 'docker', label: 'Docker Engine (Optional)', available: dockerProbe.ok, version: dockerProbe.version, detail: dockerProbe.ok ? dockerProbe.version || 'installed' : 'Docker not required for native apps' },
     dotnet: { id: 'dotnet', label: '.NET Runtime', available: dotnetProbe.ok, version: dotnetProbe.version, detail: dotnetProbe.ok ? dotnetProbe.version || 'installed' : '.NET 8 runtime not installed' },
     postgres: { id: 'postgres', label: 'PostgreSQL Server', available: postgresExists, version: postgresExists ? 'installed' : null, detail: postgresExists ? 'postgres binary available' : 'PostgreSQL server not installed' },
     mysqld: { id: 'mysqld', label: 'MySQL Server', available: mysqlExists, version: mysqlExists ? 'installed' : null, detail: mysqlExists ? 'mysqld binary available' : 'MySQL server not installed' },
@@ -214,6 +229,7 @@ export async function detectHostRuntimes(forceRefresh = false): Promise<HostRunt
 
   const report: HostRuntimesReport = {
     platform: os.platform(),
+    platformLabel: getPlatformLabel(),
     arch: os.arch(),
     checkedAt: new Date().toISOString(),
     runtimes,
@@ -274,18 +290,13 @@ function runCommandSafe(
   timeoutMs = 180_000
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawnCrossPlatform(cmd, args, {
       cwd,
-      shell: false,
       env: { ...process.env, ...envOverrides, GIT_TERMINAL_PROMPT: '0', npm_config_update_notifier: 'false' },
     })
     let output = ''
     const timer = setTimeout(() => {
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        // ignore
-      }
+      void terminateProcessTree(child.pid ?? null, child)
       reject(new Error(`Command "${cmd} ${args.join(' ')}" timed out after ${Math.round(timeoutMs / 1000)}s`))
     }, timeoutMs)
 
@@ -335,11 +346,7 @@ export class AppInstallerEngine {
   shutdownAllSync() {
     for (const rec of this.installations.values()) {
       if (rec.child && !rec.child.killed) {
-        try {
-          rec.child.kill('SIGTERM')
-        } catch {
-          // ignore
-        }
+        void terminateProcessTree(rec.pid, rec.child)
       }
     }
   }
@@ -417,36 +424,54 @@ export class AppInstallerEngine {
       checks.push({ label: 'Python venv & pip', ok: rt.pythonVenv.available, detail: rt.pythonVenv.detail })
       if (!rt.python3.available) {
         missingRequirements.push('python3')
-        remediation.push('Install Python 3.10+ on the host.')
+        remediation.push(
+          process.platform === 'win32'
+            ? 'Install Python 3.10+ from python.org or run `winget install Python.Python.3.12`.'
+            : process.platform === 'darwin'
+            ? 'Install Python 3 via `brew install python`.'
+            : 'Install Python 3.10+ on the host.'
+        )
       }
       if (!rt.pythonVenv.available) {
-        missingRequirements.push('python3-venv / pip')
-        remediation.push('Install python3-venv and pip (e.g. apt install python3.11-venv python3-pip) to isolate Python packages safely.')
+        missingRequirements.push('python venv / pip')
+        remediation.push(
+          process.platform === 'win32'
+            ? 'Reinstall Python 3 with pip and venv enabled.'
+            : process.platform === 'darwin'
+            ? 'Install Python 3 with pip & venv via Homebrew (`brew install python`).'
+            : 'Install python3-venv and pip (e.g. apt install python3-venv python3-pip) to isolate Python packages safely.'
+        )
       }
     } else if (tmpl.installMethod === 'binary-download') {
-      const archKey = os.arch() === 'arm64' ? 'linux_arm64' : 'linux_x64'
-      const downloadUrl = tmpl.installSpec?.binaryUrls?.[archKey]
+      const candidates = getPlatformBinaryCandidates()
+      const matchedKey = candidates.find((k) => Boolean(tmpl.installSpec?.binaryUrls?.[k])) || candidates[0]
+      const downloadUrl = tmpl.installSpec?.binaryUrls?.[matchedKey]
       const urlOk = Boolean(downloadUrl && isValidVerifiedHttpsDownloadUrl(downloadUrl))
       checks.push({
-        label: `Official ${archKey} Binary Release`,
+        label: `Official ${matchedKey} Binary Release`,
         ok: urlOk,
-        detail: urlOk ? `Verified HTTPS release URL ready` : `No verified ${archKey} binary URL configured`,
+        detail: urlOk ? `Verified HTTPS release URL ready` : `No verified ${matchedKey} binary URL configured for ${report.platformLabel}`,
       })
-      if (!urlOk) missingRequirements.push(`Verified ${archKey} binary URL`)
+      if (!urlOk) {
+        missingRequirements.push(`Verified ${matchedKey} binary URL`)
+        remediation.push(`Check ${tmpl.github}/releases for a native ${report.platformLabel} (${os.arch()}) build.`)
+      }
 
-      checks.push({ label: 'curl HTTPS Downloader', ok: rt.curl.available, detail: rt.curl.detail })
-      if (!rt.curl.available) missingRequirements.push('curl')
+      checks.push({ label: 'Built-in HTTPS Downloader', ok: true, detail: `Node ${process.version} fetch ready` })
 
-      const archiveType = tmpl.installSpec?.binaryArchive || 'raw'
+      const archiveType = detectArchiveType(downloadUrl || '', tmpl.installSpec?.binaryArchive || 'raw')
       if (archiveType === 'zip') {
-        checks.push({ label: 'unzip Archive Tool', ok: rt.unzip.available, detail: rt.unzip.detail })
-        if (!rt.unzip.available) missingRequirements.push('unzip')
+        checks.push({ label: rt.unzip.label, ok: rt.unzip.available, detail: rt.unzip.detail })
+        if (!rt.unzip.available) missingRequirements.push('zip extractor')
       } else if (archiveType === 'tar.gz') {
         checks.push({ label: 'tar Archive Tool', ok: rt.tar.available, detail: rt.tar.detail })
         if (!rt.tar.available) missingRequirements.push('tar')
       } else if (archiveType === 'bz2') {
         checks.push({ label: 'bzip2 Decompressor', ok: rt.bzip2.available, detail: rt.bzip2.detail })
-        if (!rt.bzip2.available) missingRequirements.push('bzip2')
+        if (!rt.bzip2.available) {
+          missingRequirements.push('bzip2')
+          remediation.push('Install bzip2 (or choose an app distributed as .zip / .tar.gz / raw binary).')
+        }
       }
     } else if (tmpl.installMethod === 'git') {
       const repoUrl = tmpl.installSpec?.gitRepo || ''
@@ -461,11 +486,11 @@ export class AppInstallerEngine {
       }
       if (tmpl.compatibility === 'Python') {
         checks.push({ label: 'Python venv & pip', ok: rt.pythonVenv.available, detail: rt.pythonVenv.detail })
-        if (!rt.pythonVenv.available) missingRequirements.push('python3-venv / pip')
+        if (!rt.pythonVenv.available) missingRequirements.push('python venv / pip')
       }
     } else if (tmpl.installMethod === 'system-binary') {
       const sysBin = tmpl.installSpec?.systemBinary || tmpl.id
-      const binaryInstalled = Boolean(rt[sysBin]?.available) || (await whichExists(sysBin))
+      const binaryInstalled = Boolean(rt[sysBin]?.available) || Boolean(findExecutableOnPath(sysBin))
       checks.push({
         label: `Host Binary (${sysBin})`,
         ok: binaryInstalled,
@@ -665,10 +690,11 @@ export class AppInstallerEngine {
             'utf8'
           )
         }
+        const npmInstallInv = resolveNpmInvocation(['install', '--no-audit', '--no-fund', '--omit=dev', spec.npmPackage])
         this.appendLog(rec, 'system', `[${rec.name}] Running: npm install --no-audit --no-fund --omit=dev ${spec.npmPackage}`)
         const res = await runCommandSafe(
-          'npm',
-          ['install', '--no-audit', '--no-fund', '--omit=dev', spec.npmPackage],
+          npmInstallInv.executable,
+          npmInstallInv.args,
           rec.appDir,
           {},
           (stream, line) => this.appendLog(rec, stream, line),
@@ -678,32 +704,33 @@ export class AppInstallerEngine {
           throw new Error(`npm install ${spec.npmPackage} exited with code ${res.code}`)
         }
         const binName = spec.npmBin || spec.npmPackage.split('/').pop() || rec.name
-        const localBin = path.join(rec.appDir, 'node_modules', '.bin', binName)
-        if (!fs.existsSync(localBin)) {
-          throw new Error(`Expected binary ${localBin} was not created by npm install`)
+        const resolved = resolveNpmBinEntrypoint(rec.appDir, binName, spec.npmPackage)
+        if (!resolved) {
+          throw new Error(`Expected entrypoint "${binName}" was not created by npm install`)
         }
-        rec.executable = localBin
-        rec.args = (spec.npmArgs || []).map((a) => this.resolvePlaceholders(a, rec))
+        rec.executable = resolved.executable
+        rec.args = [...resolved.argsPrefix, ...(spec.npmArgs || []).map((a) => this.resolvePlaceholders(a, rec))]
       } else if (tmpl.installMethod === 'python-venv' && spec.pythonPackage) {
         const venvDir = path.join(rec.appDir, '.venv')
+        const pyCmd = resolvePythonCommand()
+        const venvPaths = getVenvPaths(venvDir)
         if (!fs.existsSync(venvDir) || overwrite) {
           this.appendLog(rec, 'system', `[${rec.name}] Creating Python virtual environment at ${venvDir}`)
           const venvRes = await runCommandSafe(
-            'python3',
-            ['-m', 'venv', venvDir],
+            pyCmd.executable,
+            [...pyCmd.prefixArgs, '-m', 'venv', venvDir],
             rec.appDir,
             {},
             (stream, line) => this.appendLog(rec, stream, line),
             60_000
           )
           if (venvRes.code !== 0) {
-            throw new Error(`python3 -m venv failed (exit ${venvRes.code})`)
+            throw new Error(`python venv creation failed (exit ${venvRes.code})`)
           }
         }
-        const pipBin = path.join(venvDir, 'bin', 'pip')
         this.appendLog(rec, 'system', `[${rec.name}] Installing Python package: ${spec.pythonPackage}`)
         const pipRes = await runCommandSafe(
-          pipBin,
+          venvPaths.pip,
           ['install', '--no-input', spec.pythonPackage],
           rec.appDir,
           {},
@@ -714,19 +741,24 @@ export class AppInstallerEngine {
           throw new Error(`pip install ${spec.pythonPackage} exited with code ${pipRes.code}`)
         }
         const pyBinName = spec.pythonBin || 'python3'
-        const candidateBin = path.join(venvDir, 'bin', pyBinName)
-        rec.executable = fs.existsSync(candidateBin) ? candidateBin : path.join(venvDir, 'bin', 'python3')
+        const candidateBin = venvPaths.resolveTool(pyBinName)
+        rec.executable = fs.existsSync(candidateBin) ? candidateBin : venvPaths.python
         rec.args = (spec.pythonArgs || []).map((a) => this.resolvePlaceholders(a, rec))
       } else if (tmpl.installMethod === 'binary-download') {
-        const archKey = os.arch() === 'arm64' ? 'linux_arm64' : 'linux_x64'
-        const url = spec.binaryUrls?.[archKey]
+        const candidates = getPlatformBinaryCandidates()
+        const matchedKey = candidates.find((k) => Boolean(spec.binaryUrls?.[k])) || candidates[0]
+        const url = spec.binaryUrls?.[matchedKey]
         if (!url || !isValidVerifiedHttpsDownloadUrl(url)) {
-          throw new Error(`No verified HTTPS download URL for ${archKey}`)
+          throw new Error(`No verified HTTPS download URL for ${matchedKey}`)
         }
         const binDir = path.join(rec.appDir, 'bin')
         const binName = spec.binaryName || rec.name
-        const targetBin = path.join(binDir, binName)
-        const archiveKind = spec.binaryArchive || 'raw'
+        const targetBinName =
+          process.platform === 'win32' && !binName.toLowerCase().endsWith('.exe')
+            ? `${binName}.exe`
+            : binName
+        const targetBin = path.join(binDir, targetBinName)
+        const archiveKind = detectArchiveType(url, spec.binaryArchive || 'raw')
         const downloadDest =
           archiveKind === 'raw'
             ? targetBin
@@ -734,65 +766,22 @@ export class AppInstallerEngine {
 
         rec.phase = 'downloading'
         rec.progress = 45
-        this.appendLog(rec, 'system', `[${rec.name}] Downloading verified release from ${url}`)
-        const dlRes = await runCommandSafe(
-          'curl',
-          ['-fsSL', '--proto', '=https', '--tlsv1.2', '-o', downloadDest, url],
-          rec.appDir,
-          {},
-          (stream, line) => this.appendLog(rec, stream, line),
-          180_000
-        )
-        if (dlRes.code !== 0) {
-          throw new Error(`Download failed (curl exit ${dlRes.code})`)
+        this.appendLog(rec, 'system', `[${rec.name}] Downloading verified ${matchedKey} release from ${url}`)
+        await downloadHttpsFile(url, downloadDest, (host) => ALLOWED_DOWNLOAD_HOSTS.has(host))
+
+        if (archiveKind !== 'raw') {
+          this.appendLog(rec, 'system', `[${rec.name}] Extracting ${archiveKind} archive into ${binDir}`)
+          await extractArchiveCrossPlatform(archiveKind, downloadDest, binDir, targetBin)
         }
 
-        if (archiveKind === 'zip') {
-          this.appendLog(rec, 'system', `[${rec.name}] Extracting zip archive into ${binDir}`)
-          const exRes = await runCommandSafe(
-            'unzip',
-            ['-o', downloadDest, '-d', binDir],
-            rec.appDir,
-            {},
-            (stream, line) => this.appendLog(rec, stream, line),
-            60_000
-          )
-          if (exRes.code !== 0) throw new Error(`unzip failed (exit ${exRes.code})`)
-          fs.rmSync(downloadDest, { force: true })
-        } else if (archiveKind === 'tar.gz') {
-          this.appendLog(rec, 'system', `[${rec.name}] Extracting tar.gz archive into ${binDir}`)
-          const exRes = await runCommandSafe(
-            'tar',
-            ['-xzf', downloadDest, '-C', binDir],
-            rec.appDir,
-            {},
-            (stream, line) => this.appendLog(rec, stream, line),
-            60_000
-          )
-          if (exRes.code !== 0) throw new Error(`tar extraction failed (exit ${exRes.code})`)
-          fs.rmSync(downloadDest, { force: true })
-        } else if (archiveKind === 'bz2') {
-          const outRes = await runCommandSafe(
-            'bzip2',
-            ['-df', downloadDest],
-            rec.appDir,
-            {},
-            (stream, line) => this.appendLog(rec, stream, line),
-            60_000
-          )
-          if (outRes.code !== 0) throw new Error(`bzip2 extraction failed (exit ${outRes.code})`)
-          const extractedRaw = downloadDest.replace(/\.bz2$/, '')
-          if (fs.existsSync(extractedRaw)) {
-            fs.renameSync(extractedRaw, targetBin)
-          }
-        }
-
-        // Locate binary inside binDir (handling nested release subdirectories cleanly)
+        // Locate binary inside binDir (handling nested release subdirectories & .exe suffix cleanly)
         const resolvedBin = this.findExecutableInDir(binDir, binName)
         if (!resolvedBin) {
           throw new Error(`Binary "${binName}" not found after extracting archive`)
         }
-        fs.chmodSync(resolvedBin, 0o755)
+        if (process.platform !== 'win32') {
+          fs.chmodSync(resolvedBin, 0o755)
+        }
         rec.executable = resolvedBin
         rec.args = (spec.binaryArgs || []).map((a) => this.resolvePlaceholders(a, rec))
       } else if (tmpl.installMethod === 'git' && spec.gitRepo) {
@@ -802,8 +791,9 @@ export class AppInstallerEngine {
         const branch = spec.gitBranch || 'main'
         if (!fs.existsSync(path.join(rec.appDir, '.git'))) {
           this.appendLog(rec, 'system', `[${rec.name}] Cloning ${spec.gitRepo} (${branch})`)
+          const gitBin = findExecutableOnPath('git') || 'git'
           const cloneRes = await runCommandSafe(
-            'git',
+            gitBin,
             ['clone', '--depth', '1', '--branch', branch, '--', spec.gitRepo, rec.appDir],
             this.appsRoot,
             {},
@@ -814,20 +804,48 @@ export class AppInstallerEngine {
         }
         if (fs.existsSync(path.join(rec.appDir, 'package.json'))) {
           this.appendLog(rec, 'system', `[${rec.name}] Installing Node.js dependencies via npm...`)
+          const npmInstallInv = resolveNpmInvocation(['install', '--no-audit', '--no-fund', '--omit=dev'])
           const npmRes = await runCommandSafe(
-            'npm',
-            ['install', '--no-audit', '--no-fund', '--omit=dev'],
+            npmInstallInv.executable,
+            npmInstallInv.args,
             rec.appDir,
             {},
             (stream, line) => this.appendLog(rec, stream, line),
             240_000
           )
           if (npmRes.code !== 0) throw new Error(`npm install failed (exit ${npmRes.code})`)
-          rec.executable = 'npm'
-          rec.args = ['run', 'start']
+          const startInv = resolveNpmInvocation(['run', 'start'])
+          rec.executable = startInv.executable
+          rec.args = startInv.args
+        } else if (fs.existsSync(path.join(rec.appDir, 'requirements.txt'))) {
+          const venvDir = path.join(rec.appDir, '.venv')
+          const pyCmd = resolvePythonCommand()
+          const venvPaths = getVenvPaths(venvDir)
+          if (!fs.existsSync(venvDir)) {
+            await runCommandSafe(
+              pyCmd.executable,
+              [...pyCmd.prefixArgs, '-m', 'venv', venvDir],
+              rec.appDir,
+              {},
+              (stream, line) => this.appendLog(rec, stream, line),
+              60_000
+            )
+          }
+          this.appendLog(rec, 'system', `[${rec.name}] Installing Python dependencies from requirements.txt...`)
+          const pipRes = await runCommandSafe(
+            venvPaths.pip,
+            ['install', '--no-input', '-r', 'requirements.txt'],
+            rec.appDir,
+            {},
+            (stream, line) => this.appendLog(rec, stream, line),
+            240_000
+          )
+          if (pipRes.code !== 0) throw new Error(`pip install -r requirements.txt failed (exit ${pipRes.code})`)
+          rec.executable = venvPaths.python
+          rec.args = ['-m', 'http.server', String(rec.port)]
         }
       } else if (tmpl.installMethod === 'system-binary' && spec.systemBinary) {
-        rec.executable = spec.systemBinary
+        rec.executable = findExecutableOnPath(spec.systemBinary) || spec.systemBinary
         rec.args = (spec.systemArgs || []).map((a) => this.resolvePlaceholders(a, rec))
       }
 
@@ -909,9 +927,17 @@ export class AppInstallerEngine {
   private findExecutableInDir(dir: string, binName: string, depth = 0): string | null {
     if (depth > 3 || !fs.existsSync(dir)) return null
     const entries = fs.readdirSync(dir, { withFileTypes: true })
+    const lowerTarget = binName.toLowerCase()
     for (const entry of entries) {
+      if (!entry.isFile()) continue
+      const lower = entry.name.toLowerCase()
+      if (/\.(txt|md|sha256|sha512|sig|asc|license)$/i.test(lower)) continue
       const full = path.join(dir, entry.name)
-      if (entry.isFile() && (entry.name === binName || entry.name.startsWith(`${binName}-`))) {
+      if (
+        lower === lowerTarget ||
+        lower === `${lowerTarget}.exe` ||
+        lower.startsWith(`${lowerTarget}-`)
+      ) {
         return full
       }
     }
@@ -924,6 +950,19 @@ export class AppInstallerEngine {
     return null
   }
 
+  private resolveLaunchArgs(rec: InstalledAppRecord, tmpl: ServiceTemplate | undefined, rawTemplateArgs: string[] | undefined): string[] {
+    if (
+      tmpl?.installMethod === 'npm' &&
+      rec.executable === process.execPath &&
+      rec.args.length > 0 &&
+      rec.args[0].startsWith(rec.appDir + path.sep)
+    ) {
+      const rest = rawTemplateArgs && rawTemplateArgs.length > 0 ? rawTemplateArgs : rec.args.slice(1)
+      return [rec.args[0], ...rest]
+    }
+    return rawTemplateArgs && rawTemplateArgs.length > 0 ? rawTemplateArgs : rec.args
+  }
+
   async spawnRecordProcess(rec: InstalledAppRecord): Promise<void> {
     const tmpl = getTemplateById(rec.templateId)
     const rawTemplateArgs = tmpl?.installSpec
@@ -933,8 +972,9 @@ export class AppInstallerEngine {
         tmpl.installSpec.systemArgs
       : undefined
 
+    const launchArgs = this.resolveLaunchArgs(rec, tmpl, rawTemplateArgs)
+
     if (this.serviceEngine) {
-      const argsForEngine = rawTemplateArgs && rawTemplateArgs.length > 0 ? rawTemplateArgs : rec.args
       const svc = await this.serviceEngine.registerAndSpawn({
         id: rec.id,
         name: rec.name,
@@ -943,7 +983,7 @@ export class AppInstallerEngine {
         source: 'app-store',
         runtime: rec.runtime,
         executable: rec.executable,
-        args: argsForEngine,
+        args: launchArgs,
         workingDir: rec.appDir,
         dataDir: rec.dataDir,
         port: rec.port,
@@ -961,9 +1001,7 @@ export class AppInstallerEngine {
       return
     }
 
-    if (rawTemplateArgs && rawTemplateArgs.length > 0) {
-      rec.args = rawTemplateArgs.map((a) => this.resolvePlaceholders(a, rec))
-    }
+    rec.args = launchArgs.map((a) => this.resolvePlaceholders(a, rec))
 
     if (rec.child && rec.state === 'running') {
       await this.stopApp(rec.id)
@@ -978,9 +1016,8 @@ export class AppInstallerEngine {
     }
     this.appendLog(rec, 'system', `[${rec.name}] Starting: ${path.basename(rec.executable)} ${rec.args.join(' ')}`)
 
-    const child = spawn(rec.executable, rec.args, {
+    const child = spawnCrossPlatform(rec.executable, rec.args, {
       cwd: rec.appDir,
-      shell: false,
       env: childEnv,
     })
 
@@ -1046,28 +1083,8 @@ export class AppInstallerEngine {
     if (this.serviceEngine && this.serviceEngine.getService(rec.id)) {
       await this.serviceEngine.stopService(rec.id)
     }
-    const child = rec.child
-    if (child && !child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          try {
-            child.kill('SIGKILL')
-          } catch {
-            // ignore
-          }
-          resolve()
-        }, 2000)
-        child.once('exit', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-        try {
-          child.kill('SIGTERM')
-        } catch {
-          clearTimeout(timer)
-          resolve()
-        }
-      })
+    if (rec.child || rec.pid) {
+      await terminateProcessTree(rec.pid, rec.child)
     }
     rec.state = 'exited'
     rec.pid = null
@@ -1188,7 +1205,7 @@ export class AppInstallerEngine {
           threads: svcView.threads,
         }
       : rec.state === 'running'
-      ? samplePidResourceMetrics(rec.pid)
+      ? samplePidMetricsCrossPlatform(rec.pid, rec.id)
       : { cpuPercent: 0, memoryBytes: 0, memoryMb: 0, memoryPercent: 0, threads: 0 }
 
     const mergedLogs = svc

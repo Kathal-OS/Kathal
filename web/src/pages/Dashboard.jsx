@@ -87,7 +87,7 @@ const QUICK_APPS = [
   },
 ]
 
-export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch }) {
+export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch, onUpdateChecked }) {
   const { data: initialMetrics, loading } = useApi('/metrics')
   const { data: status } = useApi('/status')
   const [metrics, setMetrics] = useState(null)
@@ -244,7 +244,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
       <ContainerStatusWidget refreshKey={refreshKey} />
 
       {/* Quick Actions */}
-      <QuickActionsWidget onPruned={refreshDashboard} />
+      <QuickActionsWidget onPruned={refreshDashboard} onUpdateChecked={onUpdateChecked} />
 
       {/* One-Click Popular Local Apps */}
       <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">

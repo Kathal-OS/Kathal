@@ -1,11 +1,17 @@
-import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess } from 'node:child_process'
 import { samplePidResourceMetrics, formatProcessUptime } from './nativeProcess.ts'
+import {
+  getDefaultAppsRoot,
+  resolveNpmInvocation,
+  resolvePythonCommand,
+  spawnCrossPlatform,
+  terminateProcessTree,
+} from './platform.ts'
 
 export type LocalRuntimeKind =
   | 'static'
@@ -48,9 +54,7 @@ export interface LocalAppInstance {
   child?: ChildProcess
 }
 
-const APPS_ROOT = path.resolve(
-  process.env.KATHAL_APPS_DIR || path.join(os.tmpdir(), 'kathal-apps')
-)
+const APPS_ROOT = getDefaultAppsRoot()
 
 function ensureAppsRoot() {
   fs.mkdirSync(APPS_ROOT, { recursive: true })
@@ -203,10 +207,9 @@ function runCommandNoShell(
   timeoutMs = 120000
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawnCrossPlatform(cmd, args, {
       cwd,
-      shell: false,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', npm_config_update_notifier: 'false' },
     })
     let output = ''
     const timer = setTimeout(() => {
@@ -357,12 +360,14 @@ function writeScaffoldFiles(
 
   if (runtime === 'sqlite') {
     fs.writeFileSync(path.join(appDir, 'app.py'), buildPythonSqliteStudioScript(appName), 'utf8')
-    return { executable: 'python3', args: ['-u', 'app.py'], runtimeLabel: 'Python SQLite Studio' }
+    const py = resolvePythonCommand()
+    return { executable: py.executable, args: [...py.prefixArgs, '-u', 'app.py'], runtimeLabel: 'Python SQLite Studio' }
   }
 
   if (runtime === 'python') {
     fs.writeFileSync(path.join(appDir, 'app.py'), buildPythonWebAppScript(appName), 'utf8')
-    return { executable: 'python3', args: ['-u', 'app.py'], runtimeLabel: 'Python 3 Web App' }
+    const py = resolvePythonCommand()
+    return { executable: py.executable, args: [...py.prefixArgs, '-u', 'app.py'], runtimeLabel: 'Python 3 Web App' }
   }
 
   // Default: 'node'
@@ -791,9 +796,8 @@ export class LocalRuntimeManager {
       `[${app.name}] Starting local process: ${app.entryExecutable} ${app.entryArgs.join(' ')} on 127.0.0.1:${app.port}`
     )
 
-    const child = spawn(app.entryExecutable, app.entryArgs, {
+    const child = spawnCrossPlatform(app.entryExecutable, app.entryArgs, {
       cwd: app.appDir,
-      shell: false,
       env: childEnv,
     })
 
@@ -953,9 +957,10 @@ export class LocalRuntimeManager {
 
     if (fs.existsSync(pkgPath)) {
       logLine('> Detected package.json — installing dependencies via npm...')
+      const npmInstall = resolveNpmInvocation(['install', '--no-audit', '--no-fund', '--omit=dev'])
       const npmRes = await runCommandNoShell(
-        'npm',
-        ['install', '--no-audit', '--no-fund', '--omit=dev'],
+        npmInstall.executable,
+        npmInstall.args,
         appDir,
         (_s, l) => logLine(l),
         180000
@@ -968,8 +973,9 @@ export class LocalRuntimeManager {
         scripts?: Record<string, string>
       }
       if (pkg.scripts?.start) {
-        executable = 'npm'
-        args = ['run', 'start']
+        const npmStart = resolveNpmInvocation(['run', 'start'])
+        executable = npmStart.executable
+        args = npmStart.args
         runtimeLabel = 'Git Node.js App'
       } else {
         const candidate = [pkg.main, 'server.js', 'server.mjs', 'index.js', 'app.js'].find(
@@ -996,8 +1002,9 @@ export class LocalRuntimeManager {
       }
     } else if (['app.py', 'main.py', 'server.py'].some((f) => fs.existsSync(path.join(appDir, f)))) {
       const pyFile = ['app.py', 'main.py', 'server.py'].find((f) => fs.existsSync(path.join(appDir, f)))!
-      executable = 'python3'
-      args = ['-u', pyFile]
+      const py = resolvePythonCommand()
+      executable = py.executable
+      args = [...py.prefixArgs, '-u', pyFile]
       runtimeLabel = 'Git Python App'
     } else {
       const staticDir = ['dist', 'build', 'public'].find((d) =>
@@ -1061,29 +1068,7 @@ export class LocalRuntimeManager {
   async stopApp(id: string): Promise<LocalAppInstance | null> {
     const app = this.apps.get(id)
     if (!app) return null
-    const child = app.child
-    if (child && !child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          try {
-            child.kill('SIGKILL')
-          } catch {
-            // ignore
-          }
-          resolve()
-        }, 1800)
-        child.once('exit', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-        try {
-          child.kill('SIGTERM')
-        } catch {
-          clearTimeout(timer)
-          resolve()
-        }
-      })
-    }
+    await terminateProcessTree(app.pid, app.child, 1800)
     app.state = 'exited'
     app.pid = null
     app.child = undefined

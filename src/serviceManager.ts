@@ -1,10 +1,9 @@
-import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess } from 'node:child_process'
 import type { AppHealthCheckDefinition } from './templateTypes.ts'
 import { getRegistryAppById } from './appRegistry.ts'
 import {
@@ -15,6 +14,16 @@ import {
   resolveProcessWorkingDir,
   formatProcessUptime,
 } from './nativeProcess.ts'
+import {
+  getDataDir,
+  getVenvPaths,
+  resolveNpmBinEntrypoint,
+  spawnCrossPlatform,
+  terminateProcessTree,
+  samplePidMetricsCrossPlatform,
+  refreshPlatformProcessTable,
+  clearPidMetricHistory,
+} from './platform.ts'
 
 export interface ServiceLogEntry {
   timestamp: string
@@ -93,7 +102,15 @@ const DEFAULT_HEALTH_CHECK: AppHealthCheckDefinition = {
   retries: 3,
 }
 
-const cpuTreeTickHistory = new Map<string, { procTicks: number; tsMs: number }>()
+function isPidAlive(pid: number | null): boolean {
+  if (!pid || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function checkPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -109,7 +126,7 @@ function waitForTcpReady(port: number, timeoutMs = 4000): Promise<boolean> {
   return new Promise((resolve) => {
     const attempt = () => {
       const socket = new net.Socket()
-      socket.setTimeout(300)
+      socket.setTimeout(350)
       socket.once('connect', () => {
         socket.destroy()
         resolve(true)
@@ -117,7 +134,7 @@ function waitForTcpReady(port: number, timeoutMs = 4000): Promise<boolean> {
       const retry = () => {
         socket.destroy()
         if (Date.now() - start >= timeoutMs) resolve(false)
-        else setTimeout(attempt, 160)
+        else setTimeout(attempt, 180)
       }
       socket.once('error', retry)
       socket.once('timeout', retry)
@@ -127,98 +144,11 @@ function waitForTcpReady(port: number, timeoutMs = 4000): Promise<boolean> {
   })
 }
 
-function isPidAlive(pid: number | null): boolean {
-  if (!pid || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function collectDescendantPids(rootPid: number, maxDepth = 4): number[] {
-  const seen = new Set<number>([rootPid])
-  const queue: { pid: number; depth: number }[] = [{ pid: rootPid, depth: 0 }]
-
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (current.depth >= maxDepth) continue
-    try {
-      const taskDir = `/proc/${current.pid}/task`
-      if (!fs.existsSync(taskDir)) continue
-      for (const tid of fs.readdirSync(taskDir)) {
-        const childrenFile = path.join(taskDir, tid, 'children')
-        if (!fs.existsSync(childrenFile)) continue
-        const raw = fs.readFileSync(childrenFile, 'utf8').trim()
-        if (!raw) continue
-        for (const tok of raw.split(/\s+/)) {
-          const childPid = Number(tok)
-          if (Number.isInteger(childPid) && childPid > 0 && !seen.has(childPid)) {
-            seen.add(childPid)
-            queue.push({ pid: childPid, depth: current.depth + 1 })
-          }
-        }
-      }
-    } catch {
-      // Process may have exited mid-scan
-    }
-  }
-  return Array.from(seen)
-}
-
 export function sampleServiceResourceMetrics(serviceKey: string, rootPid: number | null): ServiceResourceSample {
-  const timestamp = Date.now()
-  if (!rootPid || rootPid <= 0) {
-    return { timestamp, cpuPercent: 0, memoryBytes: 0, memoryMb: 0, memoryPercent: 0, threads: 0 }
-  }
-
-  const pids = collectDescendantPids(rootPid)
-  const totalMem = os.totalmem() || 1
-  let totalBytes = 0
-  let totalThreads = 0
-  let totalTicks = 0
-
-  for (const pid of pids) {
-    try {
-      const statusText = fs.readFileSync(`/proc/${pid}/status`, 'utf8')
-      const rssMatch = /^VmRSS:\s+(\d+)\s+kB/m.exec(statusText)
-      if (rssMatch) totalBytes += Number(rssMatch[1]) * 1024
-      const threadsMatch = /^Threads:\s+(\d+)/m.exec(statusText)
-      totalThreads += Number(threadsMatch?.[1] || 1)
-    } catch {
-      // ignore exited pid
-    }
-
-    try {
-      const statText = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
-      const closeParen = statText.lastIndexOf(')')
-      if (closeParen !== -1) {
-        const fields = statText.slice(closeParen + 2).trim().split(/\s+/)
-        totalTicks += Number(fields[11] || 0) + Number(fields[12] || 0)
-      }
-    } catch {
-      // ignore exited pid
-    }
-  }
-
-  let cpuPercent = 0
-  const prev = cpuTreeTickHistory.get(serviceKey)
-  if (prev && timestamp > prev.tsMs && totalTicks >= prev.procTicks) {
-    const deltaSec = (timestamp - prev.tsMs) / 1000
-    const deltaTicks = totalTicks - prev.procTicks
-    const pct = (deltaTicks / 100 / deltaSec) * 100
-    cpuPercent = Number(Math.min(100 * Math.max(1, os.cpus().length), Math.max(0, pct)).toFixed(1))
-  }
-  cpuTreeTickHistory.set(serviceKey, { procTicks: totalTicks, tsMs: timestamp })
-
+  const sample = samplePidMetricsCrossPlatform(rootPid, `svc:${serviceKey}`)
   return {
-    timestamp,
-    cpuPercent,
-    memoryBytes: totalBytes,
-    memoryMb: Number((totalBytes / (1024 * 1024)).toFixed(1)),
-    memoryPercent: Number(((totalBytes / totalMem) * 100).toFixed(2)),
-    threads: totalThreads || 1,
+    timestamp: Date.now(),
+    ...sample,
   }
 }
 
@@ -239,7 +169,7 @@ export class ServiceManager {
     fs.mkdirSync(this.appsRoot, { recursive: true })
     this.stateFilePath = opts.stateFilePath
       ? path.resolve(opts.stateFilePath)
-      : path.resolve(process.cwd(), 'data/services-state.json')
+      : path.resolve(getDataDir(), 'services-state.json')
     this.isPortExternallyReserved = opts.isPortReserved || (() => false)
 
     this.loadPersistedState()
@@ -275,6 +205,7 @@ export class ServiceManager {
     if (this.monitorTimer) return
     this.monitorTimer = setInterval(() => {
       this.healthTickCounter += 1
+      void refreshPlatformProcessTable()
       for (const svc of this.services.values()) {
         if (svc.state !== 'running') continue
         if (!svc.child && !isPidAlive(svc.pid)) {
@@ -392,11 +323,7 @@ export class ServiceManager {
     }
     for (const svc of this.services.values()) {
       if (svc.child && !svc.child.killed) {
-        try {
-          svc.child.kill('SIGTERM')
-        } catch {
-          // ignore
-        }
+        void terminateProcessTree(svc.pid, svc.child)
       }
     }
   }
@@ -544,21 +471,25 @@ export class ServiceManager {
     let args: string[] = tmpl.installSpec?.systemArgs || []
 
     if (tmpl.installMethod === 'npm' && tmpl.installSpec?.npmBin) {
-      const localBin = path.join(appDir, 'node_modules', '.bin', tmpl.installSpec.npmBin)
-      if (!fs.existsSync(localBin)) {
-        throw new Error(`${tmpl.name} is not installed yet at ${localBin}. Use the App Store installer first.`)
+      const resolvedNpm = resolveNpmBinEntrypoint(appDir, tmpl.installSpec.npmBin, tmpl.installSpec.npmPackage)
+      if (!resolvedNpm) {
+        throw new Error(`${tmpl.name} is not installed yet in ${appDir}. Use the App Store installer first.`)
       }
-      executable = localBin
-      args = tmpl.installSpec.npmArgs || []
+      executable = resolvedNpm.executable
+      args = [...resolvedNpm.argsPrefix, ...(tmpl.installSpec.npmArgs || [])]
     } else if (tmpl.installMethod === 'python-venv') {
-      const pyBin = path.join(appDir, '.venv', 'bin', tmpl.installSpec?.pythonBin || 'python3')
+      const venv = getVenvPaths(path.join(appDir, '.venv'))
+      const pyBin = venv.resolveTool(tmpl.installSpec?.pythonBin || 'python3')
       if (!fs.existsSync(pyBin)) {
         throw new Error(`${tmpl.name} Python virtual environment not installed yet. Use the App Store installer first.`)
       }
       executable = pyBin
       args = tmpl.installSpec?.pythonArgs || []
     } else if (tmpl.installMethod === 'binary-download') {
-      const binPath = path.join(appDir, 'bin', tmpl.installSpec?.binaryName || tmpl.id)
+      const baseName = tmpl.installSpec?.binaryName || tmpl.id
+      const winExe = path.join(appDir, 'bin', `${baseName}.exe`)
+      const posixBin = path.join(appDir, 'bin', baseName)
+      const binPath = process.platform === 'win32' && fs.existsSync(winExe) ? winExe : posixBin
       if (!fs.existsSync(binPath)) {
         throw new Error(`${tmpl.name} binary not downloaded yet. Use the App Store installer first.`)
       }
@@ -605,9 +536,8 @@ export class ServiceManager {
     const displayCmd = `${path.basename(svc.executable)} ${resolvedArgs.join(' ')}`.trim()
     this.appendLog(svc, 'system', `[${svc.name}] Spawning via child_process: ${displayCmd} (cwd: ${svc.workingDir})`)
 
-    const child = spawn(svc.executable, resolvedArgs, {
+    const child = spawnCrossPlatform(svc.executable, resolvedArgs, {
       cwd: svc.workingDir,
-      shell: false,
       env: childEnv,
     })
 
@@ -691,42 +621,12 @@ export class ServiceManager {
   async stopService(idOrName: string): Promise<ManagedServiceRecord | null> {
     const svc = this.getService(idOrName)
     if (!svc) return null
-    const child = svc.child
-    const trackedPid = svc.pid
-
-    if (child && !child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          try {
-            child.kill('SIGKILL')
-          } catch {
-            // ignore
-          }
-          resolve()
-        }, 2500)
-        child.once('exit', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-        try {
-          child.kill('SIGTERM')
-        } catch {
-          clearTimeout(timer)
-          resolve()
-        }
-      })
-    } else if (trackedPid && isPidAlive(trackedPid)) {
-      try {
-        process.kill(trackedPid, 'SIGTERM')
-      } catch {
-        // ignore
-      }
-    }
+    await terminateProcessTree(svc.pid, svc.child, 2500)
 
     svc.state = 'exited'
     svc.pid = null
     svc.child = undefined
-    cpuTreeTickHistory.delete(svc.id)
+    clearPidMetricHistory(`svc:${svc.id}`)
     this.appendLog(svc, 'system', `[${svc.name}] Stopped cleanly`)
     this.saveStateToDisk()
     return svc
@@ -755,7 +655,7 @@ export class ServiceManager {
     if (!svc) return false
     await this.stopService(svc.id)
     this.services.delete(svc.id)
-    cpuTreeTickHistory.delete(svc.id)
+    clearPidMetricHistory(`svc:${svc.id}`)
     if (!keepData && svc.workingDir.startsWith(this.appsRoot + path.sep) && fs.existsSync(svc.workingDir)) {
       fs.rmSync(svc.workingDir, { recursive: true, force: true })
     }

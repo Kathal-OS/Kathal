@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Trash2, RefreshCw } from 'lucide-react'
-import { apiFetch, apiPost } from '../hooks/useApi'
+import { Trash2, RefreshCw, ExternalLink } from 'lucide-react'
+import { apiPost } from '../hooks/useApi'
 
 function formatBytes(bytes) {
   if (!bytes || bytes <= 0) return '0 B'
@@ -10,7 +10,7 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
 }
 
-export default function QuickActionsWidget({ onPruned }) {
+export default function QuickActionsWidget({ onPruned, onUpdateChecked }) {
   const [confirmingPrune, setConfirmingPrune] = useState(false)
   const [pruning, setPruning] = useState(false)
   const [pruneFeedback, setPruneFeedback] = useState(null)
@@ -55,8 +55,9 @@ export default function QuickActionsWidget({ onPruned }) {
     setCheckingUpdates(true)
     setUpdateError(null)
     try {
-      const res = await apiFetch('/system/updates')
+      const res = await apiPost('/system/check-updates', {})
       setUpdateResult(res)
+      if (onUpdateChecked) onUpdateChecked(res)
     } catch (err) {
       setUpdateError(err.message || 'Failed to check for updates.')
     } finally {
@@ -133,7 +134,7 @@ export default function QuickActionsWidget({ onPruned }) {
           <div>
             <p className="text-sm font-medium text-slate-100">Check for Updates</p>
             <p className="text-xs text-slate-400 mt-1">
-              Verify your control panel version and scan installed app images for newer releases.
+              Compare local KATHAL_VERSION from .env against the GitHub Releases API.
             </p>
           </div>
 
@@ -145,7 +146,7 @@ export default function QuickActionsWidget({ onPruned }) {
               className="inline-flex items-center gap-2 px-4 py-2 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium whitespace-nowrap transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${checkingUpdates ? 'animate-spin' : ''}`} />
-              <span>{checkingUpdates ? 'Checking...' : 'Check for Updates'}</span>
+              <span>{checkingUpdates ? 'Checking GitHub...' : 'Check for Updates'}</span>
             </button>
           </div>
 
@@ -156,11 +157,29 @@ export default function QuickActionsWidget({ onPruned }) {
           )}
 
           {updateResult && (
-            <div className="p-3 rounded-lg text-xs bg-green-500/10 border border-green-500/30 text-green-300 space-y-1">
-              <div className="flex items-center justify-between font-medium text-green-400">
+            <div
+              className={`p-3 rounded-lg text-xs border space-y-1.5 ${
+                updateResult.updateAvailable
+                  ? 'bg-yellow-500/10 border-yellow-500/35 text-yellow-200'
+                  : updateResult.status === 'unavailable'
+                  ? 'bg-slate-900/70 border-slate-700 text-slate-300'
+                  : 'bg-green-500/10 border-green-500/30 text-green-300'
+              }`}
+            >
+              <div
+                className={`flex items-center justify-between font-medium ${
+                  updateResult.updateAvailable
+                    ? 'text-yellow-300'
+                    : updateResult.status === 'unavailable'
+                    ? 'text-slate-200'
+                    : 'text-green-400'
+                }`}
+              >
                 <span>
                   {updateResult.updateAvailable
                     ? `Update available: v${updateResult.latestVersion}`
+                    : updateResult.status === 'unavailable'
+                    ? `Local v${updateResult.currentVersion} (GitHub check skipped)`
                     : `Up to date (v${updateResult.currentVersion})`}
                 </span>
                 <span className="text-[11px] text-slate-400 tabular-nums">
@@ -168,6 +187,17 @@ export default function QuickActionsWidget({ onPruned }) {
                 </span>
               </div>
               <p className="text-slate-300">{updateResult.message}</p>
+              {updateResult.releaseUrl && (
+                <a
+                  href={updateResult.releaseUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-yellow-300 hover:text-yellow-200 font-medium"
+                >
+                  <span>View {updateResult.releaseName || 'GitHub Release'}</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
             </div>
           )}
         </div>

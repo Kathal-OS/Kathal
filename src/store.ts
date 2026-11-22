@@ -1,6 +1,7 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
+import { getSystemDiskMount } from './platform.ts'
 
 export interface ContainerRecord {
   id: string
@@ -293,18 +294,17 @@ export class MemoryStore {
     return Number(Math.min(100, Math.max(0.5, pct)).toFixed(1))
   }
 
-  private getDiskStats(): { total: number; used: number; free: number; percent: number } {
+  private getDiskStats(): { total: number; used: number; free: number; percent: number; mount: string } {
+    const mount = getSystemDiskMount()
     try {
-      const stats = fs.statfsSync('/')
-      const total = stats.blocks * stats.bsize
-      const free = stats.bavail * stats.bsize
+      const stats = fs.statfsSync(mount)
+      const total = Number(stats.blocks) * Number(stats.bsize)
+      const free = Number(stats.bavail) * Number(stats.bsize)
       const used = Math.max(0, total - free)
       const percent = total > 0 ? Number(((used / total) * 100).toFixed(1)) : 0
-      return { total, used, free, percent }
+      return { total, used, free, percent, mount }
     } catch {
-      const total = 100 * 1024 * 1024 * 1024
-      const used = 34 * 1024 * 1024 * 1024
-      return { total, used, free: total - used, percent: 34.0 }
+      return { total: 0, used: 0, free: 0, percent: 0, mount }
     }
   }
 
@@ -328,8 +328,11 @@ export class MemoryStore {
         percent: memPercent,
       },
       disk: {
-        ...disk,
-        path: '/',
+        total: disk.total,
+        used: disk.used,
+        free: disk.free,
+        percent: disk.percent,
+        path: disk.mount,
       },
       network: {
         bytesSent: 18432000 + Math.floor(process.uptime() * 4096),

@@ -1,10 +1,17 @@
-import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
 import http from 'node:http'
 import crypto from 'node:crypto'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess } from 'node:child_process'
+import {
+  isProtectedSystemPath,
+  resolvePythonCommand,
+  samplePidMetricsCrossPlatform,
+  spawnCrossPlatform,
+  terminateProcessTree,
+  clearPidMetricHistory,
+} from './platform.ts'
 
 export interface NativeProcessLogLine {
   timestamp: string
@@ -39,7 +46,6 @@ const BLOCKED_ENV_KEYS = new Set([
   'DYLD_LIBRARY_PATH',
   'IFS',
 ])
-const BLOCKED_SYSTEM_DIRS = ['/etc', '/proc', '/sys', '/dev', '/boot', '/root']
 
 export function sanitizeProcessName(rawName: string): string {
   const cleaned = String(rawName || '')
@@ -80,8 +86,13 @@ export function validateBinaryExecutable(rawExec: string): { ok: true; executabl
   }
 
   // Resolve "node" reliably to the active Node binary
-  if (trimmed === 'node') {
+  if (trimmed === 'node' || trimmed === 'node.exe') {
     return { ok: true, executable: process.execPath }
+  }
+
+  if (trimmed === 'python3' || trimmed === 'python') {
+    const py = resolvePythonCommand()
+    return { ok: true, executable: py.executable }
   }
 
   return { ok: true, executable: trimmed }
@@ -175,10 +186,8 @@ export function resolveProcessWorkingDir(
   }
 
   const resolved = path.resolve(trimmed)
-  for (const blocked of BLOCKED_SYSTEM_DIRS) {
-    if (resolved === blocked || resolved.startsWith(blocked + path.sep)) {
-      throw new Error(`Working directory "${resolved}" is a protected system path`)
-    }
+  if (isProtectedSystemPath(resolved)) {
+    throw new Error(`Working directory "${resolved}" is a protected system path`)
   }
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
     throw new Error(`Working directory does not exist: ${resolved}`)
@@ -244,65 +253,8 @@ export interface ProcessResourceMetrics {
   threads: number
 }
 
-const cpuTickHistory = new Map<number, { procTicks: number; tsMs: number }>()
-
-export function samplePidResourceMetrics(pid: number | null): ProcessResourceMetrics {
-  if (!pid || pid <= 0) {
-    return { cpuPercent: 0, memoryBytes: 0, memoryMb: 0, memoryPercent: 0, threads: 0 }
-  }
-
-  let memoryBytes = 0
-  let threads = 1
-  let cpuPercent = 0
-  const totalMem = os.totalmem() || 1
-
-  try {
-    const statusText = fs.readFileSync(`/proc/${pid}/status`, 'utf8')
-    const rssMatch = /^VmRSS:\s+(\d+)\s+kB/m.exec(statusText)
-    if (rssMatch) {
-      memoryBytes = Number(rssMatch[1]) * 1024
-    }
-    const threadsMatch = /^Threads:\s+(\d+)/m.exec(statusText)
-    if (threadsMatch) {
-      threads = Number(threadsMatch[1]) || 1
-    }
-  } catch {
-    // Process exited or non-Linux host
-  }
-
-  try {
-    const statText = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
-    const closeParen = statText.lastIndexOf(')')
-    if (closeParen !== -1) {
-      const fields = statText.slice(closeParen + 2).trim().split(/\s+/)
-      // fields[0] is state (field 3), utime is field 14 -> index 11, stime is field 15 -> index 12
-      const utime = Number(fields[11] || 0)
-      const stime = Number(fields[12] || 0)
-      const procTicks = utime + stime
-      const now = Date.now()
-      const prev = cpuTickHistory.get(pid)
-      if (prev && now > prev.tsMs) {
-        const deltaSec = (now - prev.tsMs) / 1000
-        const deltaTicks = Math.max(0, procTicks - prev.procTicks)
-        // Standard Linux USER_HZ = 100 ticks/sec
-        const pct = ((deltaTicks / 100) / deltaSec) * 100
-        cpuPercent = Number(Math.min(100 * Math.max(1, os.cpus().length), Math.max(0, pct)).toFixed(1))
-      }
-      cpuTickHistory.set(pid, { procTicks, tsMs: now })
-    }
-  } catch {
-    cpuTickHistory.delete(pid)
-  }
-
-  const memoryMb = Number((memoryBytes / (1024 * 1024)).toFixed(1))
-  const memoryPercent = Number(((memoryBytes / totalMem) * 100).toFixed(2))
-  return {
-    cpuPercent,
-    memoryBytes,
-    memoryMb,
-    memoryPercent,
-    threads,
-  }
+export function samplePidResourceMetrics(pid: number | null, metricKey?: string): ProcessResourceMetrics {
+  return samplePidMetricsCrossPlatform(pid, metricKey)
 }
 
 export function formatProcessUptime(startedAt: number | null): { uptimeSeconds: number; uptimeLabel: string } {
@@ -400,9 +352,8 @@ export class NativeProcessService {
       `[${proc.name}] Spawning native binary (${proc.workingDir}): ${displayCmd}`
     )
 
-    const child = spawn(proc.executable, resolvedArgs, {
+    const child = spawnCrossPlatform(proc.executable, resolvedArgs, {
       cwd: proc.workingDir,
-      shell: false,
       env: childEnv,
     })
 
@@ -533,29 +484,8 @@ export class NativeProcessService {
   async stopProcess(id: string): Promise<NativeProcessInstance | null> {
     const proc = this.processes.get(id)
     if (!proc) return null
-    const child = proc.child
-    if (child && !child.killed) {
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
-          try {
-            child.kill('SIGKILL')
-          } catch {
-            // ignore
-          }
-          resolve()
-        }, 1800)
-        child.once('exit', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-        try {
-          child.kill('SIGTERM')
-        } catch {
-          clearTimeout(timer)
-          resolve()
-        }
-      })
-    }
+    await terminateProcessTree(proc.pid, proc.child, 1800)
+    clearPidMetricHistory(`pid:${proc.pid ?? id}`)
     proc.state = 'exited'
     proc.pid = null
     proc.child = undefined

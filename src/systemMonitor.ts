@@ -1,11 +1,13 @@
 import os from 'node:os'
 import fs from 'node:fs'
+import { getPlatformLabel, getSystemDiskMount } from './platform.ts'
 
 export interface SystemMonitorSnapshot {
   timestamp: string
   host: {
     hostname: string
     platform: string
+    platformLabel: 'Windows' | 'macOS' | 'Linux'
     release: string
     arch: string
     uptimeSeconds: number
@@ -128,7 +130,8 @@ export function collectSystemMonitorData(): SystemMonitorSnapshot & {
   const usedMem = Math.max(0, totalMem - freeMem)
   const memPercent = totalMem > 0 ? Number(((usedMem / totalMem) * 100).toFixed(1)) : 0
 
-  const disk = readDiskStats('/')
+  const diskMount = getSystemDiskMount()
+  const disk = readDiskStats(diskMount)
   const timestamp = new Date().toISOString()
 
   snapshotHistory.push({
@@ -146,6 +149,7 @@ export function collectSystemMonitorData(): SystemMonitorSnapshot & {
     host: {
       hostname: os.hostname(),
       platform: os.platform(),
+      platformLabel: getPlatformLabel(),
       release: os.release(),
       arch: os.arch(),
       uptimeSeconds: Math.floor(os.uptime()),

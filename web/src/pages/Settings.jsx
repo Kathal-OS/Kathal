@@ -15,6 +15,9 @@ import {
   RotateCw,
   AlertTriangle,
   Laptop,
+  RefreshCw,
+  ExternalLink,
+  ArrowUpCircle,
 } from 'lucide-react'
 import { useApi, apiFetch, apiPost, apiPut } from '../hooks/useApi'
 import PWAInstallButton from '../components/PWAInstallButton'
@@ -31,12 +34,14 @@ const QUICK_DEPLOY_CATALOG = [
   { id: 'uptime-kuma', name: 'Uptime Kuma', icon: ShieldCheck, desc: 'Uptime monitor', image: 'louislam/uptime-kuma:latest', port: 3001 },
 ]
 
-export default function Settings() {
+export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdateChecked }) {
   const { data: status } = useApi('/status')
   const { isInstalled, platform } = usePWAInstall()
   const [settings, setSettings] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saveBanner, setSaveBanner] = useState(null)
+  const [updateInfo, setUpdateInfo] = useState(initialUpdateInfo)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
 
   const [deployingId, setDeployingId] = useState(null)
   const [deployBanner, setDeployBanner] = useState(null)
@@ -46,10 +51,35 @@ export default function Settings() {
   const [copiedSecret, setCopiedSecret] = useState(false)
 
   useEffect(() => {
+    if (initialUpdateInfo) setUpdateInfo(initialUpdateInfo)
+  }, [initialUpdateInfo])
+
+  useEffect(() => {
     apiFetch('/settings')
       .then((data) => setSettings(data))
       .catch(() => {})
-  }, [])
+    if (!initialUpdateInfo) {
+      apiFetch('/system/updates')
+        .then((res) => {
+          setUpdateInfo(res)
+          onUpdateChecked?.(res)
+        })
+        .catch(() => {})
+    }
+  }, [initialUpdateInfo, onUpdateChecked])
+
+  const handleManualUpdateCheck = async () => {
+    setCheckingUpdates(true)
+    try {
+      const res = await apiPost('/system/check-updates', {})
+      setUpdateInfo(res)
+      onUpdateChecked?.(res)
+    } catch (err) {
+      setSaveBanner({ type: 'error', text: err.message || 'Update check failed.' })
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }
 
   const handleSaveSettings = async (e) => {
     e.preventDefault()
@@ -342,9 +372,26 @@ export default function Settings() {
         </form>
       )}
 
-      {/* System Info */}
-      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-slate-100 mb-4">System</h2>
+      {/* System Info & Auto-Update Checker */}
+      <div id="updates" className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">System &amp; GitHub Release Updates</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Compares <code className="text-slate-300">KATHAL_VERSION</code> against the GitHub Releases API
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleManualUpdateCheck}
+            disabled={checkingUpdates}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-kathal-600 hover:bg-kathal-500 text-white text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdates ? 'animate-spin' : ''}`} />
+            <span>{checkingUpdates ? 'Checking GitHub...' : 'Check GitHub Releases'}</span>
+          </button>
+        </div>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
             <p className="text-xs text-slate-400 mb-1">Platform</p>
@@ -356,15 +403,53 @@ export default function Settings() {
           </div>
           <div>
             <p className="text-xs text-slate-400 mb-1">KATHAL Version</p>
-            <p className="font-medium text-slate-100 font-mono text-sm">v{status?.version || '0.1.0'}</p>
+            <p className="font-medium text-slate-100 font-mono text-sm">
+              v{updateInfo?.currentVersion || status?.version || '0.1.0'}
+              {updateInfo?.versionSource ? (
+                <span className="text-xs text-slate-400 font-sans ml-1.5">({updateInfo.versionSource})</span>
+              ) : null}
+            </p>
           </div>
           <div>
-            <p className="text-xs text-slate-400 mb-1">Engine Status</p>
-            <p className="font-medium text-sm">
-              <span className="text-green-400">Local Native Runtime</span>
+            <p className="text-xs text-slate-400 mb-1">Release Repository</p>
+            <p className="font-medium text-sm font-mono text-green-400">
+              {updateInfo?.repository || 'kathal-os/kathal'}
             </p>
           </div>
         </div>
+
+        {updateInfo && (
+          <div
+            className={`p-3.5 rounded-lg border text-xs flex flex-wrap items-center justify-between gap-3 ${
+              updateInfo.updateAvailable
+                ? 'bg-yellow-500/10 border-yellow-500/35 text-yellow-200'
+                : updateInfo.status === 'unavailable'
+                ? 'bg-slate-900/70 border-slate-800 text-slate-300'
+                : 'bg-green-500/10 border-green-500/30 text-green-300'
+            }`}
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 font-semibold">
+                {updateInfo.updateAvailable && <ArrowUpCircle className="w-4 h-4 text-yellow-400" />}
+                <span>{updateInfo.message}</span>
+              </div>
+              {updateInfo.releaseNotes && (
+                <p className="text-slate-300/90 max-w-3xl line-clamp-2">{updateInfo.releaseNotes}</p>
+              )}
+            </div>
+            {updateInfo.releaseUrl && (
+              <a
+                href={updateInfo.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/40 text-yellow-200 font-medium shrink-0"
+              >
+                <span>Open Release</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Desktop App Support */}
@@ -419,7 +504,7 @@ export default function Settings() {
           </Link>
         </div>
         <p className="text-sm text-slate-400 mb-4">
-          Click any service to launch a running container and configure a domain route automatically.
+          Click any service to launch it locally and configure a reverse proxy domain route automatically.
         </p>
 
         {deployBanner && (
@@ -459,40 +544,40 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Install on other platforms */}
+      {/* Install on any OS (100% self-hosted, zero cloud) */}
       <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
         <div className="flex items-center gap-2 mb-4">
           <Terminal className="w-4 h-4 text-slate-400" />
-          <h2 className="text-lg font-semibold text-slate-100">Install on Other Servers</h2>
+          <h2 className="text-lg font-semibold text-slate-100">Install on Windows, macOS & Linux (Zero Cloud)</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-            <p className="font-medium text-slate-200 mb-2">Windows</p>
+            <p className="font-medium text-slate-200 mb-2">Windows (10 / 11 / Server)</p>
             <code className="text-xs text-slate-300 font-mono block bg-slate-950 border border-slate-800 rounded-lg p-2.5 mb-2 overflow-x-auto">
-              powershell -ExecutionPolicy Bypass -File install.ps1
+              powershell -ExecutionPolicy Bypass -File scripts/install.ps1
             </code>
-            <p className="text-xs text-slate-400">Requires Docker Desktop for container management.</p>
+            <p className="text-xs text-slate-400">Runs natively with Node.js & Python. Optional Windows Scheduled Task auto-start, zero Docker required.</p>
           </div>
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-            <p className="font-medium text-slate-200 mb-2">macOS</p>
+            <p className="font-medium text-slate-200 mb-2">macOS (Apple Silicon & Intel)</p>
             <code className="text-xs text-slate-300 font-mono block bg-slate-950 border border-slate-800 rounded-lg p-2.5 mb-2 overflow-x-auto">
-              curl -fsSL https://raw.githubusercontent.com/bakeweb/kathal-os/master/scripts/install-mac.sh | bash
+              bash scripts/install-mac.sh
             </code>
-            <p className="text-xs text-slate-400">Auto-installs Docker, creates launchd service.</p>
+            <p className="text-xs text-slate-400">Sets up Homebrew Node.js, builds locally, and optionally configures a launchd background service.</p>
           </div>
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-            <p className="font-medium text-slate-200 mb-2">Linux</p>
+            <p className="font-medium text-slate-200 mb-2">Linux (Ubuntu / Debian / Fedora / Arch)</p>
             <code className="text-xs text-slate-300 font-mono block bg-slate-950 border border-slate-800 rounded-lg p-2.5 mb-2 overflow-x-auto">
-              curl -fsSL https://raw.githubusercontent.com/bakeweb/kathal-os/master/scripts/install.sh | sudo bash
+              bash scripts/install.sh
             </code>
-            <p className="text-xs text-slate-400">Creates systemd service, auto-starts on boot.</p>
+            <p className="text-xs text-slate-400">Builds locally with zero external cloud dependencies and prints a ready-to-enable systemd unit.</p>
           </div>
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4">
-            <p className="font-medium text-slate-200 mb-2">Docker (Any Platform)</p>
+            <p className="font-medium text-slate-200 mb-2">Desktop App (Electron + PWA)</p>
             <code className="text-xs text-slate-300 font-mono block bg-slate-950 border border-slate-800 rounded-lg p-2.5 mb-2 overflow-x-auto">
-              docker run -d --name kathal -p 3000:3000 -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/bakeweb/kathal-os:latest
+              npm run desktop
             </code>
-            <p className="text-xs text-slate-400">Works on any platform with Docker installed.</p>
+            <p className="text-xs text-slate-400">Runs the standalone desktop window directly against your local host across Windows, macOS, and Linux.</p>
           </div>
         </div>
       </div>
@@ -506,7 +591,7 @@ export default function Settings() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="font-medium text-slate-100">Reset Dashboard</p>
-            <p className="text-sm text-slate-400">Restore default containers, routes, and operational settings.</p>
+            <p className="text-sm text-slate-400">Restore default apps, routes, and operational settings.</p>
           </div>
           <div className="flex items-center gap-2">
             <button

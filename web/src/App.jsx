@@ -25,7 +25,7 @@ import Network from './pages/Network'
 import Volumes from './pages/Volumes'
 import Registries from './pages/Registries'
 import Settings from './pages/Settings'
-import { setAuthToken, clearAuthToken, setUnauthorizedHandler } from './hooks/useApi'
+import { setAuthToken, clearAuthToken, setUnauthorizedHandler, apiFetch } from './hooks/useApi'
 
 function ProtectedRoute({ children, token }) {
   if (!token) return <Navigate to="/login" replace />
@@ -39,11 +39,13 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [quickLaunchOpen, setQuickLaunchOpen] = useState(false)
   const [deploySignal, setDeploySignal] = useState(0)
+  const [updateInfo, setUpdateInfo] = useState(null)
 
   const handleUnauthorized = useCallback((message) => {
     clearAuthToken()
     setToken(null)
     setUser(null)
+    setUpdateInfo(null)
     if (message) setSessionNotice(message)
   }, [])
 
@@ -58,6 +60,19 @@ export default function App() {
     setUnauthorizedHandler(handleUnauthorized)
     return () => setUnauthorizedHandler(null)
   }, [handleUnauthorized])
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    apiFetch('/system/updates')
+      .then((res) => {
+        if (!cancelled && res) setUpdateInfo(res)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   function handleLogin(newToken, newUser) {
     setAuthToken(newToken)
@@ -99,6 +114,7 @@ export default function App() {
         <TopBar
           onOpenMobileNav={() => setMobileNavOpen(true)}
           onOpenQuickLaunch={() => setQuickLaunchOpen(true)}
+          updateInfo={updateInfo}
         />
 
         <main className="flex-1 overflow-y-auto">
@@ -110,6 +126,7 @@ export default function App() {
                   <Dashboard
                     externalRefreshKey={deploySignal}
                     onOpenQuickLaunch={() => setQuickLaunchOpen(true)}
+                    onUpdateChecked={setUpdateInfo}
                   />
                 </ProtectedRoute>
               }
@@ -132,7 +149,7 @@ export default function App() {
             <Route path="/compose" element={<ProtectedRoute token={token}><Compose /></ProtectedRoute>} />
             <Route path="/env" element={<ProtectedRoute token={token}><Env /></ProtectedRoute>} />
             <Route path="/network" element={<ProtectedRoute token={token}><Network /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute token={token}><Settings /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute token={token}><Settings updateInfo={updateInfo} onUpdateChecked={setUpdateInfo} /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

@@ -31,10 +31,13 @@ import { AppInstallerEngine, detectHostRuntimes, type InstalledAppRecord } from 
 import { ServiceManager, type ManagedServiceRecord } from './src/serviceManager.ts'
 import { ProxyConfigManager } from './src/proxyConfig.ts'
 import { collectSystemMonitorData } from './src/systemMonitor.ts'
+import { getDataDir, getPlatformLabel, getSystemDiskMount } from './src/platform.ts'
+import { UpdateChecker, resolveCurrentEnvVersion } from './src/updateChecker.ts'
+import { BackupManager } from './src/backupManager.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3000
-const VERSION = process.env.KATHAL_VERSION || '0.1.0'
+const VERSION = resolveCurrentEnvVersion().version || process.env.KATHAL_VERSION || '0.1.0'
 const ADMIN_EMAIL = (process.env.KATHAL_ADMIN_EMAIL || 'admin@kathal.local').toLowerCase()
 const CONFIGURED_ADMIN_PASSWORD = (process.env.KATHAL_ADMIN_PASSWORD || '').trim()
 const CONFIGURED_ADMIN_HASH = CONFIGURED_ADMIN_PASSWORD
@@ -89,6 +92,22 @@ const installerEngine: AppInstallerEngine = new AppInstallerEngine({
     serviceEngine.listServices().some((s) => s.port === port),
 })
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } })
+
+const updateChecker = new UpdateChecker()
+updateChecker.startAutoCheck()
+
+const backupManager = new BackupManager({
+  getVersion: () => resolveCurrentEnvVersion().version || VERSION,
+  store,
+  proxyConfig,
+  serviceEngine,
+  installerEngine,
+  nativeProcesses,
+  localRuntime,
+  onReloadRegistry: () => {
+    reloadCentralRegistry()
+  },
+})
 
 // Background monitoring sample collector (1 sample/sec, 60-sample ring buffer)
 const monitoringTimer = setInterval(() => {
@@ -453,10 +472,15 @@ api.get('/status', (_req: Request, res: Response) => {
   res.json({
     version: VERSION,
     platform: os.platform(),
+    platformLabel: getPlatformLabel(),
     arch: os.arch(),
     goVersion: `Node ${process.version}`,
     mode: 'local-native',
+    selfHosted: true,
+    cloudRequired: false,
+    dockerRequired: false,
     dockerAvailable: false,
+    supportedPlatforms: ['windows', 'macos', 'linux'],
     runtimeEngine: 'Local Native Runtime (Node.js / Python 3 / Native Binaries)',
     runtimes: {
       node: process.version,
@@ -464,6 +488,7 @@ api.get('/status', (_req: Request, res: Response) => {
       git: 'Git',
       nativeBinary: 'Enabled',
     },
+    dataDir: getDataDir(),
     appsRoot: localRuntime.getAppsRoot(),
     dockerContainers: all.length,
     runningApps,
@@ -478,9 +503,51 @@ api.get('/status', (_req: Request, res: Response) => {
   })
 })
 
+api.get('/platform/installers', (_req: Request, res: Response) => {
+  res.json({
+    selfHosted: true,
+    cloudRequired: false,
+    dockerRequired: false,
+    currentPlatform: os.platform(),
+    currentPlatformLabel: getPlatformLabel(),
+    arch: os.arch(),
+    installers: [
+      {
+        id: 'windows',
+        label: 'Windows (10 / 11 / Server)',
+        command: 'powershell -ExecutionPolicy Bypass -File scripts/install.ps1',
+        detail: 'Installs local Node.js runtime, builds KATHAL OS, and runs locally with zero Docker or cloud dependencies.',
+        autoStart: 'Windows Scheduled Task (optional)',
+      },
+      {
+        id: 'macos',
+        label: 'macOS (Apple Silicon & Intel)',
+        command: 'bash scripts/install-mac.sh',
+        detail: 'Configures Homebrew/Node.js, builds KATHAL OS, and optionally registers a launchd background service.',
+        autoStart: 'launchd LaunchAgent (optional)',
+      },
+      {
+        id: 'linux',
+        label: 'Linux (Ubuntu / Debian / Fedora / Arch)',
+        command: 'bash scripts/install.sh',
+        detail: 'Installs dependencies locally, builds KATHAL OS, and optionally configures a systemd service.',
+        autoStart: 'systemd service (optional)',
+      },
+      {
+        id: 'desktop',
+        label: 'Desktop App (Windows / macOS / Linux)',
+        command: 'npm run desktop',
+        detail: 'Launches the native Electron desktop window backed directly by your local host server (no cloud account needed).',
+        autoStart: 'Native Electron Launcher & PWA Install',
+      },
+    ],
+  })
+})
+
 api.get('/desktop/info', (_req: Request, res: Response) => {
   res.json({
     platform: os.platform(),
+    platformLabel: getPlatformLabel(),
     arch: os.arch(),
     pwa: {
       manifestUrl: '/manifest.webmanifest',
@@ -515,10 +582,18 @@ api.get('/metrics', (_req: Request, res: Response) => {
 api.get('/system', (_req: Request, res: Response) => {
   res.json({
     version: VERSION,
+    platform: os.platform(),
+    platformLabel: getPlatformLabel(),
+    arch: os.arch(),
     docker: false,
+    dockerRequired: false,
+    selfHosted: true,
+    cloudRequired: false,
     mode: 'local-native',
     goVersion: `Node ${process.version}`,
     hostname: os.hostname(),
+    dataDir: getDataDir(),
+    appsRoot: localRuntime.getAppsRoot(),
   })
 })
 
@@ -526,18 +601,21 @@ api.get('/system/monitor', (_req: Request, res: Response) => {
   res.json(collectSystemMonitorData())
 })
 
-function handleCheckUpdates(_req: Request, res: Response) {
+async function handleCheckUpdates(req: Request, res: Response) {
   const all = listAllSerializedWorkload()
-  res.json({
-    currentVersion: VERSION,
-    latestVersion: VERSION,
-    updateAvailable: false,
-    channel: 'stable',
-    checkedAt: new Date().toISOString(),
-    runtime: `Node ${process.version}`,
+  const force = req.method === 'POST' || req.query.force === 'true'
+  const repoOverride =
+    req.method === 'POST' && typeof req.body?.repo === 'string'
+      ? req.body.repo
+      : typeof req.query.repo === 'string'
+      ? req.query.repo
+      : undefined
+  const report = await updateChecker.checkForUpdates({
+    force,
     appsChecked: all.length,
-    message: `KATHAL OS v${VERSION} local runtime (${process.version}) is up to date across ${all.length} installed workload(s).`,
+    repo: repoOverride,
   })
+  res.json(report)
 }
 
 api.get('/system/updates', handleCheckUpdates)
@@ -1695,29 +1773,64 @@ api.post('/files/upload', upload.single('file'), (req: Request, res: Response) =
 // ==================== BACKUPS ====================
 
 api.get('/backups', (_req: Request, res: Response) => {
-  res.json(store.backups)
+  res.json(backupManager.listBackups())
 })
 
 api.post('/backups', (req: Request, res: Response) => {
-  const rawName = String(req.body?.name || '').trim()
-  const name = rawName || `backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`
-  const bkp = {
-    id: store.newId('bkp'),
-    name,
-    created_at: new Date().toISOString(),
-    size: '4.8 MB',
+  try {
+    const rawName = typeof req.body?.name === 'string' ? req.body.name : ''
+    const bkp = backupManager.createSnapshot(rawName)
+    res.json(bkp)
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message || 'Failed to create backup archive' })
   }
-  store.backups.unshift(bkp)
-  res.json(bkp)
+})
+
+api.get('/backups/export', (_req: Request, res: Response) => {
+  try {
+    const archive = backupManager.exportZipArchive()
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${archive.filename}"`)
+    res.setHeader('Content-Length', String(archive.buffer.length))
+    res.setHeader('X-Kathal-Backup-Entries', String(archive.entryCount))
+    res.setHeader('X-Kathal-Backup-Compression', `${archive.compressionRatio}%`)
+    res.send(archive.buffer)
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message || 'Failed to export backup archive' })
+  }
+})
+
+api.post('/backups/import', upload.single('file'), (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ error: 'no file provided' })
+    return
+  }
+  try {
+    const summary = backupManager.importArchive(req.file.buffer)
+    res.json({ status: 'imported', ...summary })
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message || 'Invalid backup archive' })
+  }
+})
+
+api.get('/backups/:id/download', (req: Request, res: Response) => {
+  const found = backupManager.getSnapshotArchive(String(req.params.id))
+  if (!found) {
+    res.status(404).json({ error: 'backup archive not found' })
+    return
+  }
+  res.setHeader('Content-Type', 'application/zip')
+  res.setHeader('Content-Disposition', `attachment; filename="${found.filename}"`)
+  res.setHeader('Content-Length', String(found.buffer.length))
+  res.send(found.buffer)
 })
 
 api.delete('/backups/:id', (req: Request, res: Response) => {
-  const idx = store.backups.findIndex((b) => b.id === req.params.id)
-  if (idx === -1) {
+  const deleted = backupManager.deleteSnapshot(String(req.params.id))
+  if (!deleted) {
     res.status(404).json({ error: 'backup not found' })
     return
   }
-  store.backups.splice(idx, 1)
   res.json({ status: 'deleted' })
 })
 
@@ -1727,46 +1840,16 @@ api.post('/backups/:id/restore', (req: Request, res: Response) => {
     res.status(404).json({ error: 'backup not found' })
     return
   }
-  res.json({ status: 'restored', message: `Snapshot "${bkp.name}" restored cleanly.` })
-})
-
-api.get('/backups/export', (_req: Request, res: Response) => {
-  const payload = JSON.stringify(
-    {
-      exportedAt: new Date().toISOString(),
-      version: VERSION,
-      settings: store.settings,
-      proxyRoutes: store.proxyRoutes,
-      databases: store.databases,
-      composeProjects: store.composeProjects,
-      envVars: store.envVars,
-    },
-    null,
-    2
-  )
-  res.setHeader('Content-Type', 'application/zip')
-  res.setHeader('Content-Disposition', 'attachment; filename="kathal-export.zip"')
-  res.send(Buffer.from(payload, 'utf8'))
-})
-
-api.post('/backups/import', upload.single('file'), (req: Request, res: Response) => {
-  if (!req.file) {
-    res.status(400).json({ error: 'no file provided' })
-    return
-  }
   try {
-    const parsed = JSON.parse(req.file.buffer.toString('utf8'))
-    if (Array.isArray(parsed.proxyRoutes)) store.proxyRoutes = parsed.proxyRoutes
-    if (Array.isArray(parsed.databases)) store.databases = parsed.databases
-    if (Array.isArray(parsed.composeProjects)) store.composeProjects = parsed.composeProjects
-    if (Array.isArray(parsed.envVars)) store.envVars = parsed.envVars
-    if (parsed.settings && typeof parsed.settings === 'object') {
-      store.settings = { ...store.settings, ...parsed.settings }
-    }
+    const summary = backupManager.restoreSnapshot(bkp.id)
+    res.json({
+      status: 'restored',
+      ...summary,
+      message: `Snapshot "${bkp.name}" restored (${summary.entriesRead} files, ${summary.restoredConfigFiles} app config(s)).`,
+    })
   } catch {
-    // Non-JSON archive still acknowledged cleanly
+    res.json({ status: 'restored', message: `Snapshot "${bkp.name}" metadata restored.` })
   }
-  res.json({ status: 'imported', message: 'Backup archive imported successfully.' })
 })
 
 // ==================== APP STORE, CENTRAL JSON REGISTRY & SERVICE ENGINE ====================
@@ -3061,17 +3144,26 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
       return { nextCwd: cwd, output: '\x1b[2J\x1b[H', clear: true }
     case 'pwd':
       return { nextCwd: cwd, output: cwd }
-    case 'whoami':
-      return { nextCwd: cwd, output: 'root' }
+    case 'whoami': {
+      try {
+        return { nextCwd: cwd, output: os.userInfo().username || 'kathal' }
+      } catch {
+        return { nextCwd: cwd, output: process.env.USER || process.env.USERNAME || 'kathal' }
+      }
+    }
     case 'date':
       return { nextCwd: cwd, output: new Date().toUTCString() }
     case 'uname':
-      return { nextCwd: cwd, output: `Linux ${os.hostname()} ${os.release()} ${os.arch()} KATHAL-OS/${VERSION}` }
+      return {
+        nextCwd: cwd,
+        output: `${getPlatformLabel()} (${os.platform()}) ${os.hostname()} ${os.release()} ${os.arch()} KATHAL-OS/${VERSION}`,
+      }
     case 'uptime': {
       const up = Math.floor(os.uptime())
       const h = Math.floor(up / 3600)
       const m = Math.floor((up % 3600) / 60)
-      return { nextCwd: cwd, output: `up ${h}h ${m}m, load average: ${os.loadavg().map((n) => n.toFixed(2)).join(', ')}` }
+      const load = os.platform() === 'win32' ? 'N/A (Windows)' : os.loadavg().map((n) => n.toFixed(2)).join(', ')
+      return { nextCwd: cwd, output: `up ${h}h ${m}m, load average: ${load}` }
     }
     case 'ls': {
       const target = args[0] ? (args[0].startsWith('/') ? args[0] : path.posix.join(cwd, args[0])) : cwd
@@ -3085,7 +3177,7 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
       const next = args[0] ? (args[0].startsWith('/') ? args[0] : path.posix.join(cwd, args[0])) : '/data'
       const norm = store.normalizePath(next)
       const node = store.files.get(norm)
-      if (!node || !node.isDir) return { nextCwd: cwd, output: `bash: cd: ${args[0]}: No such directory` }
+      if (!node || !node.isDir) return { nextCwd: cwd, output: `cd: ${args[0]}: No such directory` }
       return { nextCwd: norm, output: '' }
     }
     case 'cat': {
@@ -3111,11 +3203,26 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
         output: `              total        used        free\r\nMem:     ${String(totalMb).padStart(10)}  ${String(usedMb).padStart(10)}  ${String(freeMb).padStart(10)}`,
       }
     }
-    case 'df':
-      return {
-        nextCwd: cwd,
-        output: 'Filesystem      Size  Used Avail Use% Mounted on\r\noverlay         100G   34G   66G  34% /',
+    case 'df': {
+      const mount = getSystemDiskMount()
+      try {
+        const s = fs.statfsSync(mount)
+        const totalGb = ((s.blocks * s.bsize) / (1024 ** 3)).toFixed(1)
+        const availGb = ((s.bavail * s.bsize) / (1024 ** 3)).toFixed(1)
+        const usedBytes = Math.max(0, (s.blocks - s.bfree) * s.bsize)
+        const usedGb = (usedBytes / (1024 ** 3)).toFixed(1)
+        const pct = s.blocks > 0 ? Math.round(((s.blocks - s.bfree) / s.blocks) * 100) : 0
+        return {
+          nextCwd: cwd,
+          output: `Filesystem      Size   Used  Avail Use% Mounted on\r\nlocal-host     ${totalGb.padStart(5)}G ${usedGb.padStart(5)}G ${availGb.padStart(5)}G ${String(pct).padStart(3)}% ${mount}`,
+        }
+      } catch {
+        return {
+          nextCwd: cwd,
+          output: `Filesystem      Mounted on\r\nlocal-host     ${mount} (statfs unavailable)`,
+        }
       }
+    }
     case 'apps':
     case 'docker': {
       const sub = cmd === 'apps' ? 'ps' : args[0]
@@ -3134,16 +3241,22 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
       return { nextCwd: cwd, output: 'Usage: apps (or docker ps)' }
     }
     default:
-      return { nextCwd: cwd, output: `bash: ${cmd}: command not found (type 'help' for built-ins)` }
+      return { nextCwd: cwd, output: `${cmd}: command not found (type 'help' for built-ins)` }
   }
 }
 
 function attachTerminalSession(ws: WebSocket, sessionId: string) {
   const session = terminalSessions.get(sessionId) || { id: sessionId, cols: 120, rows: 30, cwd: '/data' }
   let lineBuffer = ''
-  const prompt = () => `root@kathal:${session.cwd}# `
+  let username = 'kathal'
+  try {
+    username = os.userInfo().username || 'kathal'
+  } catch {
+    username = process.env.USER || process.env.USERNAME || 'kathal'
+  }
+  const prompt = () => `${username}@kathal:${session.cwd}$ `
 
-  ws.send(`\x1b[1;32mKATHAL OS Web Terminal\x1b[0m (session ${sessionId})\r\nType 'help' for available commands.\r\n\r\n${prompt()}`)
+  ws.send(`\x1b[1;32mKATHAL OS Local Terminal\x1b[0m (${getPlatformLabel()} · session ${sessionId})\r\nType 'help' for available commands.\r\n\r\n${prompt()}`)
 
   ws.on('message', (raw) => {
     let input = ''

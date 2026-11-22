@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ProxyRoute, PlatformSettings } from './store.ts'
 import { isValidDomainName, validateLocalProxyTarget } from './localRuntime.ts'
+import { getDataDir } from './platform.ts'
 
 export interface PersistedProxyRoute extends ProxyRoute {
   targetHost?: string
@@ -22,7 +23,7 @@ export interface PersistedProxyConfig {
 }
 
 const DEFAULT_CONFIG_PATH = path.resolve(
-  process.env.KATHAL_PROXY_CONFIG_FILE || path.join(process.cwd(), 'data', 'reverse-proxy.json')
+  process.env.KATHAL_PROXY_CONFIG_FILE || path.join(getDataDir(), 'reverse-proxy.json')
 )
 
 export class ProxyConfigManager {

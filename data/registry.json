@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "updatedAt": "2026-11-21T22:28:57.854Z",
+  "updatedAt": "2026-11-22T16:51:52.902Z",
   "totalApps": 134,
   "categories": {
     "databases": {
@@ -142,10 +142,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which postgres || # Install PostgreSQL via system package manager"
+          "# Ensure postgres is installed on PATH for your OS"
         ],
         "start": [
           "postgres -D {DATA_DIR} -p {PORT}"
@@ -257,10 +257,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which mysqld || # Install MySQL via system package manager"
+          "# Ensure mysqld is installed on PATH for your OS"
         ],
         "start": [
           "mysqld --port={PORT} --datadir={DATA_DIR}"
@@ -372,10 +372,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which mariadbd || # Install MariaDB via system package manager"
+          "# Ensure mariadbd is installed on PATH for your OS"
         ],
         "start": [
           "mariadbd --port={PORT} --datadir={DATA_DIR}"
@@ -490,10 +490,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which mongod || # Install MongoDB via system package manager"
+          "# Ensure mongod is installed on PATH for your OS"
         ],
         "start": [
           "mongod --port {PORT} --dbpath {DATA_DIR}"
@@ -609,10 +609,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which redis-server || # Install Redis via system package manager"
+          "# Ensure redis-server is installed on PATH for your OS"
         ],
         "start": [
           "redis-server --port {PORT} --dir {DATA_DIR} --bind 127.0.0.1"
@@ -726,10 +726,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which valkey-server || # Install Valkey via system package manager"
+          "# Ensure valkey-server is installed on PATH for your OS"
         ],
         "start": [
           "valkey-server --port {PORT} --dir {DATA_DIR} --bind 127.0.0.1"
@@ -841,10 +841,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which nginx || # Install Nginx via system package manager"
+          "# Ensure nginx is installed on PATH for your OS"
         ],
         "start": [
           "nginx -c {DIR}/nginx.conf -g daemon off;"
@@ -915,9 +915,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -925,7 +923,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_mac_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_mac_arm64.tar.gz",
+          "win32_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_windows_amd64.zip"
         },
         "binaryName": "caddy",
         "binaryArchive": "tar.gz",
@@ -964,10 +965,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
+          "Download https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -996,7 +998,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -1035,9 +1037,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Static File Provider)"
@@ -1045,7 +1045,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_darwin_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_darwin_arm64.tar.gz",
+          "win32_x64": "https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_windows_amd64.zip"
         },
         "binaryName": "traefik",
         "binaryArchive": "tar.gz",
@@ -1087,10 +1090,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_linux_amd64.tar.gz",
+          "Download https://github.com/traefik/traefik/releases/download/v3.3.3/traefik_v3.3.3_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -1120,7 +1124,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -1156,9 +1160,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None"
@@ -1166,7 +1168,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_mac_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_mac_arm64.tar.gz",
+          "win32_x64": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_windows_amd64.zip"
         },
         "binaryName": "caddy",
         "binaryArchive": "tar.gz",
@@ -1212,10 +1217,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
+          "Download https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -1244,7 +1250,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -1331,10 +1337,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install WordPress via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}"
@@ -1574,10 +1580,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Drupal via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/web"
@@ -1653,9 +1659,8 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "git",
-        "curl"
+        "Windows / macOS / Linux",
+        "git"
       ],
       "dependencies": [
         "Embedded SQLite3 (default)"
@@ -1663,7 +1668,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-linux-amd64",
-          "linux_arm64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-linux-arm64"
+          "linux_arm64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-linux-arm64",
+          "darwin_x64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-darwin-10.12-amd64",
+          "darwin_arm64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-darwin-10.12-arm64",
+          "win32_x64": "https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-windows-4.0-amd64.exe"
         },
         "binaryName": "gitea",
         "binaryArchive": "raw",
@@ -1701,11 +1709,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/bin/gitea https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-linux-amd64",
-          "chmod +x {DIR}/bin/gitea"
+          "Download https://github.com/go-gitea/gitea/releases/download/v1.23.4/gitea-1.23.4-linux-amd64",
+          "chmod +x {DIR}/bin/gitea (POSIX)"
         ],
         "start": [
           "{DIR}/bin/gitea web --port {PORT} --work-path {DATA_DIR}"
@@ -1734,7 +1743,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, git, curl are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux, git are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -2157,7 +2166,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -2272,10 +2280,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which grafana-server || # Install Grafana via system package manager"
+          "# Ensure grafana-server is installed on PATH for your OS"
         ],
         "start": [
           "grafana-server --homepath {DATA_DIR}"
@@ -2338,9 +2346,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Local TSDB)"
@@ -2348,7 +2354,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-amd64.tar.gz",
-          "linux_arm64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-arm64.tar.gz"
+          "linux_arm64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-arm64.tar.gz",
+          "darwin_x64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.darwin-amd64.tar.gz",
+          "darwin_arm64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.darwin-arm64.tar.gz",
+          "win32_x64": "https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.windows-amd64.zip"
         },
         "binaryName": "prometheus",
         "binaryArchive": "tar.gz",
@@ -2397,10 +2406,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-amd64.tar.gz",
+          "Download https://github.com/prometheus/prometheus/releases/download/v3.1.0/prometheus-3.1.0.linux-amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -2424,7 +2434,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -2502,7 +2512,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch 1.23.16 https://github.com/louislam/uptime-kuma.git {DIR}",
@@ -2720,10 +2730,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which jellyfin || # Install Jellyfin via system package manager"
+          "# Ensure jellyfin is installed on PATH for your OS"
         ],
         "start": [
           "jellyfin --datadir {DATA_DIR}"
@@ -2838,10 +2848,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Nextcloud via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}"
@@ -2951,10 +2961,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which vaultwarden || # Install Vaultwarden via system package manager"
+          "# Ensure vaultwarden is installed on PATH for your OS"
         ],
         "start": [
           "vaultwarden"
@@ -3178,10 +3188,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which wg || # Install WireGuard VPN via system package manager"
+          "# Ensure wg is installed on PATH for your OS"
         ],
         "start": [
           "wg show"
@@ -3295,10 +3305,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which pihole-FTL || # Install Pi-hole via system package manager"
+          "# Ensure pihole-FTL is installed on PATH for your OS"
         ],
         "start": [
           "pihole-FTL no-daemon"
@@ -3364,9 +3374,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Go Binary)"
@@ -3374,7 +3382,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_darwin_amd64.zip",
+          "darwin_arm64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_darwin_arm64.zip",
+          "win32_x64": "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_windows_amd64.zip"
         },
         "binaryName": "AdGuardHome",
         "binaryArchive": "tar.gz",
@@ -3420,10 +3431,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_linux_amd64.tar.gz",
+          "Download https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.57/AdGuardHome_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -3452,7 +3464,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -3530,10 +3542,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which crowdsec || # Install CrowdSec via system package manager"
+          "# Ensure crowdsec is installed on PATH for your OS"
         ],
         "start": [
           "crowdsec"
@@ -3643,10 +3655,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which ollama || # Install Ollama via system package manager"
+          "# Ensure ollama is installed on PATH for your OS"
         ],
         "start": [
           "ollama serve"
@@ -3761,7 +3773,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -4111,7 +4122,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -4186,9 +4196,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "unzip"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "Embedded SQLite (included)"
@@ -4197,7 +4205,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_linux_amd64.zip",
-          "linux_arm64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_linux_arm64.zip"
+          "linux_arm64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_linux_arm64.zip",
+          "darwin_x64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_darwin_amd64.zip",
+          "darwin_arm64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_darwin_arm64.zip",
+          "win32_x64": "https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_windows_amd64.zip"
         },
         "binaryName": "pocketbase",
         "binaryArchive": "zip",
@@ -4233,11 +4244,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.zip https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_linux_amd64.zip",
-          "unzip -o {DIR}/download.zip -d {DIR}/bin"
+          "Download https://github.com/pocketbase/pocketbase/releases/download/v0.25.9/pocketbase_0.25.9_linux_amd64.zip",
+          "Extract ZIP into {DIR}/bin"
         ],
         "start": [
           "{DIR}/bin/pocketbase serve --http=127.0.0.1:{PORT} --dir={DATA_DIR}"
@@ -4266,7 +4278,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, unzip are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -4348,10 +4360,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which clickhouse-server || # Install ClickHouse via system package manager"
+          "# Ensure clickhouse-server is installed on PATH for your OS"
         ],
         "start": [
           "clickhouse-server --config-file={DIR}/config.xml"
@@ -4414,9 +4426,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "unzip"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Binary)"
@@ -4424,7 +4434,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-linux-amd64.zip",
-          "linux_arm64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-linux-aarch64.zip"
+          "linux_arm64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-linux-aarch64.zip",
+          "darwin_x64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-osx-universal.zip",
+          "darwin_arm64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-osx-universal.zip",
+          "win32_x64": "https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-windows-amd64.zip"
         },
         "binaryName": "duckdb",
         "binaryArchive": "zip",
@@ -4467,11 +4480,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.zip https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-linux-amd64.zip",
-          "unzip -o {DIR}/download.zip -d {DIR}/bin"
+          "Download https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli-linux-amd64.zip",
+          "Extract ZIP into {DIR}/bin"
         ],
         "start": [
           "{DIR}/bin/duckdb {DATA_DIR}/analytics.duckdb -ui"
@@ -4499,7 +4513,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, unzip are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -4537,9 +4551,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "Embedded RocksDB / SurrealKV"
@@ -4548,7 +4560,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.linux-amd64.tgz",
-          "linux_arm64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.linux-arm64.tgz"
+          "linux_arm64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.linux-arm64.tgz",
+          "darwin_x64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.darwin-amd64.tgz",
+          "darwin_arm64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.darwin-arm64.tgz",
+          "win32_x64": "https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.windows-amd64.exe"
         },
         "binaryName": "surreal",
         "binaryArchive": "tar.gz",
@@ -4595,10 +4610,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.linux-amd64.tgz",
+          "Download https://github.com/surrealdb/surrealdb/releases/download/v2.2.1/surreal-v2.2.1.linux-amd64.tgz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -4629,7 +4645,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -4667,8 +4683,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -4677,7 +4692,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-linux-amd64",
-          "linux_arm64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-linux-aarch64"
+          "linux_arm64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-linux-aarch64",
+          "darwin_x64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-macos-amd64",
+          "darwin_arm64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-macos-apple-silicon",
+          "win32_x64": "https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-windows-amd64.exe"
         },
         "binaryName": "meilisearch",
         "binaryArchive": "raw",
@@ -4721,11 +4739,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/bin/meilisearch https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-linux-amd64",
-          "chmod +x {DIR}/bin/meilisearch"
+          "Download https://github.com/meilisearch/meilisearch/releases/download/v1.12.8/meilisearch-linux-amd64",
+          "chmod +x {DIR}/bin/meilisearch (POSIX)"
         ],
         "start": [
           "{DIR}/bin/meilisearch --http-addr 127.0.0.1:{PORT} --db-path {DATA_DIR} --no-analytics"
@@ -4755,7 +4774,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -4837,10 +4856,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which typesense-server || # Install Typesense via system package manager"
+          "# Ensure typesense-server is installed on PATH for your OS"
         ],
         "start": [
           "typesense-server --data-dir={DATA_DIR} --api-port={PORT} --api-key=changeme"
@@ -4906,9 +4925,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -4917,7 +4934,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-x86_64-unknown-linux-musl.tar.gz",
-          "linux_arm64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-aarch64-unknown-linux-musl.tar.gz"
+          "linux_arm64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-aarch64-unknown-linux-musl.tar.gz",
+          "darwin_x64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-x86_64-apple-darwin.tar.gz",
+          "darwin_arm64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-aarch64-apple-darwin.tar.gz",
+          "win32_x64": "https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-x86_64-pc-windows-msvc.zip"
         },
         "binaryName": "qdrant",
         "binaryArchive": "tar.gz",
@@ -4956,10 +4976,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-x86_64-unknown-linux-musl.tar.gz",
+          "Download https://github.com/qdrant/qdrant/releases/download/v1.13.4/qdrant-x86_64-unknown-linux-musl.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -4989,7 +5010,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -5079,7 +5100,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -5147,9 +5167,8 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "git",
-        "curl"
+        "Linux (x64 / arm64)",
+        "git"
       ],
       "dependencies": [
         "Embedded SQLite3"
@@ -5203,11 +5222,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/bin/forgejo https://codeberg.org/forgejo/forgejo/releases/download/v10.0.1/forgejo-10.0.1-linux-amd64",
-          "chmod +x {DIR}/bin/forgejo"
+          "Download https://codeberg.org/forgejo/forgejo/releases/download/v10.0.1/forgejo-10.0.1-linux-amd64",
+          "chmod +x {DIR}/bin/forgejo (POSIX)"
         ],
         "start": [
           "{DIR}/bin/forgejo web --port {PORT} --work-path {DATA_DIR}"
@@ -5235,7 +5255,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, git, curl are installed on the host machine before launching."
+          "fix": "Verify Linux (x64 / arm64), git are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -5270,10 +5290,8 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "git",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux",
+        "git"
       ],
       "dependencies": [
         "Embedded SQLite3"
@@ -5281,7 +5299,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_linux_armv8.tar.gz"
+          "linux_arm64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_linux_armv8.tar.gz",
+          "darwin_x64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_darwin_amd64.zip",
+          "darwin_arm64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_darwin_arm64.zip",
+          "win32_x64": "https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_windows_amd64.zip"
         },
         "binaryName": "gogs",
         "binaryArchive": "tar.gz",
@@ -5324,10 +5345,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_linux_amd64.tar.gz",
+          "Download https://github.com/gogs/gogs/releases/download/v0.13.2/gogs_0.13.2_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -5356,7 +5378,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, git, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux, git are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -5438,7 +5460,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/hoppscotch/hoppscotch.git {DIR}",
@@ -5790,7 +5812,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -5900,10 +5921,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which java || # Install SonarQube via system package manager"
+          "# Ensure java is installed on PATH for your OS"
         ],
         "start": [
           "java -version"
@@ -6229,7 +6250,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/twentyhq/twenty.git {DIR}",
@@ -6346,10 +6367,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install EspoCRM via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}"
@@ -6457,10 +6478,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which vikunja || # Install Vikunja via system package manager"
+          "# Ensure vikunja is installed on PATH for your OS"
         ],
         "start": [
           "vikunja"
@@ -6784,7 +6805,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch stable https://github.com/toeverything/AFFiNE.git {DIR}",
@@ -6897,7 +6918,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/calcom/cal.com.git {DIR}",
@@ -7015,10 +7036,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Leantime via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/public"
@@ -7129,7 +7150,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/Mintplex-Labs/anything-llm.git {DIR}",
@@ -7358,7 +7379,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/lobehub/lobe-chat.git {DIR}",
@@ -7471,7 +7492,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/danny-avila/LibreChat.git {DIR}",
@@ -7588,7 +7609,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -7704,7 +7724,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -7820,10 +7839,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which local-ai || # Install LocalAI via system package manager"
+          "# Ensure local-ai is installed on PATH for your OS"
         ],
         "start": [
           "local-ai --address 127.0.0.1:{PORT} --models-path {DATA_DIR}"
@@ -7932,7 +7951,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/comfyanonymous/ComfyUI.git {DIR}",
@@ -8043,7 +8062,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/AUTOMATIC1111/stable-diffusion-webui.git {DIR}",
@@ -8159,7 +8178,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -8271,10 +8289,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which netdata || # Install Netdata via system package manager"
+          "# Ensure netdata is installed on PATH for your OS"
         ],
         "start": [
           "netdata -D -p {PORT}"
@@ -8343,9 +8361,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "Embedded SQLite (included)"
@@ -8353,7 +8369,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_darwin_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_darwin_arm64.tar.gz",
+          "win32_x64": "https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_windows_amd64.zip"
         },
         "binaryName": "beszel",
         "binaryArchive": "tar.gz",
@@ -8388,10 +8407,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_linux_amd64.tar.gz",
+          "Download https://github.com/henrygd/beszel/releases/download/v0.10.2/beszel_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -8420,7 +8440,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -8503,7 +8523,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -8616,10 +8635,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which scrutiny || # Install Scrutiny via system package manager"
+          "# Ensure scrutiny is installed on PATH for your OS"
         ],
         "start": [
           "scrutiny start"
@@ -8732,7 +8751,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/TwiN/gatus.git {DIR}",
@@ -8841,7 +8860,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/healthchecks/healthchecks.git {DIR}",
@@ -8915,9 +8934,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -8926,7 +8943,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_darwin_all.tar.gz",
+          "darwin_arm64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_darwin_all.tar.gz",
+          "win32_x64": "https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_windows_amd64.zip"
         },
         "binaryName": "ntfy",
         "binaryArchive": "tar.gz",
@@ -8963,10 +8983,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_amd64.tar.gz",
+          "Download https://github.com/binwiederhier/ntfy/releases/download/v2.11.0/ntfy_2.11.0_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -8995,7 +9016,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -9184,7 +9205,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/advplyr/audiobookshelf.git {DIR}",
@@ -9260,9 +9281,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "Optional FFmpeg for transcoding"
@@ -9270,7 +9289,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_darwin_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_darwin_arm64.tar.gz",
+          "win32_x64": "https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_windows_amd64.zip"
         },
         "binaryName": "navidrome",
         "binaryArchive": "tar.gz",
@@ -9311,10 +9333,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_linux_amd64.tar.gz",
+          "Download https://github.com/navidrome/navidrome/releases/download/v0.54.5/navidrome_0.54.5_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -9345,7 +9368,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -9431,10 +9454,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which java || # Install Stirling PDF via system package manager"
+          "# Ensure java is installed on PATH for your OS"
         ],
         "start": [
           "java -jar {DIR}/Stirling-PDF.jar --server.port={PORT}"
@@ -9504,9 +9527,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -9515,7 +9536,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/linux-amd64-filebrowser.tar.gz",
-          "linux_arm64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/linux-arm64-filebrowser.tar.gz"
+          "linux_arm64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/linux-arm64-filebrowser.tar.gz",
+          "darwin_x64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/darwin-amd64-filebrowser.tar.gz",
+          "darwin_arm64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/darwin-arm64-filebrowser.tar.gz",
+          "win32_x64": "https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/windows-amd64-filebrowser.zip"
         },
         "binaryName": "filebrowser",
         "binaryArchive": "tar.gz",
@@ -9556,10 +9580,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/linux-amd64-filebrowser.tar.gz",
+          "Download https://github.com/filebrowser/filebrowser/releases/download/v2.32.0/linux-amd64-filebrowser.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -9588,7 +9613,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -9623,9 +9648,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -9633,7 +9656,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-linux-amd64-v1.29.2.tar.gz",
-          "linux_arm64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-linux-arm64-v1.29.2.tar.gz"
+          "linux_arm64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-linux-arm64-v1.29.2.tar.gz",
+          "darwin_x64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-macos-amd64-v1.29.2.zip",
+          "darwin_arm64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-macos-arm64-v1.29.2.zip",
+          "win32_x64": "https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-windows-amd64-v1.29.2.zip"
         },
         "binaryName": "syncthing",
         "binaryArchive": "tar.gz",
@@ -9678,10 +9704,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-linux-amd64-v1.29.2.tar.gz",
+          "Download https://github.com/syncthing/syncthing/releases/download/v1.29.2/syncthing-linux-amd64-v1.29.2.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -9710,7 +9737,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -9790,10 +9817,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which kiwix-serve || # Install Kiwix via system package manager"
+          "# Ensure kiwix-serve is installed on PATH for your OS"
         ],
         "start": [
           "kiwix-serve --port={PORT} --library {DATA_DIR}/library.xml"
@@ -9903,10 +9930,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which java || # Install Komga via system package manager"
+          "# Ensure java is installed on PATH for your OS"
         ],
         "start": [
           "java -jar {DIR}/komga.jar --server.port={PORT}"
@@ -10017,7 +10044,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -10083,8 +10109,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl"
+        "macOS / Linux (x64 / arm64)"
       ],
       "dependencies": [
         "Embedded SQLite (default)"
@@ -10092,7 +10117,9 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_linux_amd64",
-          "linux_arm64": "https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_linux_arm64"
+          "linux_arm64": "https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_linux_arm64",
+          "darwin_x64": "https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_darwin_amd64",
+          "darwin_arm64": "https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_darwin_arm64"
         },
         "binaryName": "headscale",
         "binaryArchive": "raw",
@@ -10141,11 +10168,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/bin/headscale https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_linux_amd64",
-          "chmod +x {DIR}/bin/headscale"
+          "Download https://github.com/juanfont/headscale/releases/download/v0.25.1/headscale_0.25.1_linux_amd64",
+          "chmod +x {DIR}/bin/headscale (POSIX)"
         ],
         "start": [
           "{DIR}/bin/headscale serve --config {DIR}/config.yaml"
@@ -10168,7 +10196,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl are installed on the host machine before launching."
+          "fix": "Verify macOS / Linux (x64 / arm64) are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -10355,10 +10383,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which dotnet || # Install Technitium DNS via system package manager"
+          "# Ensure dotnet is installed on PATH for your OS"
         ],
         "start": [
           "dotnet {DIR}/DnsServerApp.dll"
@@ -10469,10 +10497,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which ntopng || # Install ntopng via system package manager"
+          "# Ensure ntopng is installed on PATH for your OS"
         ],
         "start": [
           "ntopng -w {PORT}"
@@ -10534,9 +10562,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Embedded BadgerDB)"
@@ -10544,7 +10570,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_linux_0.28.2_amd64.tar.gz",
-          "linux_arm64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_linux_0.28.2_arm64.tar.gz"
+          "linux_arm64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_linux_0.28.2_arm64.tar.gz",
+          "darwin_x64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_darwin_0.28.2_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_darwin_0.28.2_arm64.tar.gz",
+          "win32_x64": "https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_windows_0.28.2_amd64.zip"
         },
         "binaryName": "step-ca",
         "binaryArchive": "tar.gz",
@@ -10587,10 +10616,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_linux_0.28.2_amd64.tar.gz",
+          "Download https://github.com/smallstep/certificates/releases/download/v0.28.2/step-ca_linux_0.28.2_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -10619,7 +10649,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -10808,10 +10838,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which tailscaled || # Install Tailscale via system package manager"
+          "# Ensure tailscaled is installed on PATH for your OS"
         ],
         "start": [
           "tailscaled --state={DATA_DIR}/tailscaled.state"
@@ -10875,9 +10905,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "macOS / Linux (x64 / arm64)"
       ],
       "dependencies": [
         "Embedded BoltDB (default)"
@@ -10885,7 +10913,9 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_linux_amd64.tar.gz",
-          "linux_arm64": "https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_linux_arm64.tar.gz"
+          "linux_arm64": "https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_linux_arm64.tar.gz",
+          "darwin_x64": "https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_darwin_amd64.tar.gz",
+          "darwin_arm64": "https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_darwin_arm64.tar.gz"
         },
         "binaryName": "semaphore",
         "binaryArchive": "tar.gz",
@@ -10929,10 +10959,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_linux_amd64.tar.gz",
+          "Download https://github.com/semaphoreui/semaphore/releases/download/v2.12.14/semaphore_2.12.14_linux_amd64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -10962,7 +10993,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify macOS / Linux (x64 / arm64) are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -11042,7 +11073,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch develop https://github.com/nocodb/nocodb.git {DIR}",
@@ -11611,7 +11642,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/umami-software/umami.git {DIR}",
@@ -11831,10 +11862,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Matomo via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}"
@@ -12053,7 +12084,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/glitchtip/glitchtip.git {DIR}",
@@ -12270,10 +12301,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which mattermost || # Install Mattermost via system package manager"
+          "# Ensure mattermost is installed on PATH for your OS"
         ],
         "start": [
           "mattermost"
@@ -12488,7 +12519,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch develop https://github.com/element-hq/element-web.git {DIR}",
@@ -12810,7 +12841,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/excalidraw/excalidraw.git {DIR}",
@@ -12926,7 +12957,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch main https://github.com/outline/outline.git {DIR}",
@@ -13045,10 +13076,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install BookStack via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/public"
@@ -13159,7 +13190,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/sissbruecker/linkding.git {DIR}",
@@ -13275,10 +13306,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Wallabag via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/web"
@@ -13391,7 +13422,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -13572,8 +13602,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -13582,7 +13611,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://dl.min.io/server/minio/release/linux-amd64/minio",
-          "linux_arm64": "https://dl.min.io/server/minio/release/linux-arm64/minio"
+          "linux_arm64": "https://dl.min.io/server/minio/release/linux-arm64/minio",
+          "darwin_x64": "https://dl.min.io/server/minio/release/darwin-amd64/minio",
+          "darwin_arm64": "https://dl.min.io/server/minio/release/darwin-arm64/minio",
+          "win32_x64": "https://dl.min.io/server/minio/release/windows-amd64/minio.exe"
         },
         "binaryName": "minio",
         "binaryArchive": "raw",
@@ -13625,11 +13657,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/bin/minio https://dl.min.io/server/minio/release/linux-amd64/minio",
-          "chmod +x {DIR}/bin/minio"
+          "Download https://dl.min.io/server/minio/release/linux-amd64/minio",
+          "chmod +x {DIR}/bin/minio (POSIX)"
         ],
         "start": [
           "{DIR}/bin/minio server {DATA_DIR} --address 127.0.0.1:{PORT}"
@@ -13659,7 +13692,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -13740,10 +13773,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which garage || # Install Garage via system package manager"
+          "# Ensure garage is installed on PATH for your OS"
         ],
         "start": [
           "garage -c {DIR}/garage.toml server"
@@ -13808,9 +13841,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "bzip2"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -13818,7 +13849,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_amd64.bz2",
-          "linux_arm64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_arm64.bz2"
+          "linux_arm64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_arm64.bz2",
+          "darwin_x64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_darwin_amd64.bz2",
+          "darwin_arm64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_darwin_arm64.bz2",
+          "win32_x64": "https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_windows_amd64.zip"
         },
         "binaryName": "restic",
         "binaryArchive": "bz2",
@@ -13860,10 +13894,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.bz2 https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_amd64.bz2",
+          "Download https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_amd64.bz2",
           "bzip2 -df {DIR}/download.bz2"
         ],
         "start": [
@@ -13894,7 +13929,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, bzip2 are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -13930,9 +13965,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "tar"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -13940,7 +13973,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-linux-x64.tar.gz",
-          "linux_arm64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-linux-arm64.tar.gz"
+          "linux_arm64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-linux-arm64.tar.gz",
+          "darwin_x64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-macOS-x64.tar.gz",
+          "darwin_arm64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-macOS-arm64.tar.gz",
+          "win32_x64": "https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-windows-x64.zip"
         },
         "binaryName": "kopia",
         "binaryArchive": "tar.gz",
@@ -13985,10 +14021,11 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.tar.gz https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-linux-x64.tar.gz",
+          "Download https://github.com/kopia/kopia/releases/download/v0.19.0/kopia-0.19.0-linux-x64.tar.gz",
           "tar -xzf {DIR}/download.tar.gz -C {DIR}/bin"
         ],
         "start": [
@@ -14018,7 +14055,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, tar are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -14052,9 +14089,7 @@
       "dockerFreeSupported": true,
       "installMethod": "binary-download",
       "requirements": [
-        "linux-x64 / arm64",
-        "curl",
-        "unzip"
+        "Windows / macOS / Linux"
       ],
       "dependencies": [
         "None (Single Static Binary)"
@@ -14062,7 +14097,10 @@
       "installSpec": {
         "binaryUrls": {
           "linux_x64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-linux-amd64.zip",
-          "linux_arm64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-linux-arm64.zip"
+          "linux_arm64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-linux-arm64.zip",
+          "darwin_x64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-osx-amd64.zip",
+          "darwin_arm64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-osx-arm64.zip",
+          "win32_x64": "https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-windows-amd64.zip"
         },
         "binaryName": "rclone",
         "binaryArchive": "zip",
@@ -14107,11 +14145,12 @@
       "installCommands": {
         "mode": "binary",
         "prepare": [
-          "mkdir -p {DIR}/bin {DIR}/data"
+          "mkdir {DIR}/bin",
+          "mkdir {DATA_DIR}"
         ],
         "install": [
-          "curl -fsSL --proto =https --tlsv1.2 -o {DIR}/download.zip https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-linux-amd64.zip",
-          "unzip -o {DIR}/download.zip -d {DIR}/bin"
+          "Download https://github.com/rclone/rclone/releases/download/v1.69.1/rclone-v1.69.1-linux-amd64.zip",
+          "Extract ZIP into {DIR}/bin"
         ],
         "start": [
           "{DIR}/bin/rclone rcd --rc-web-gui --rc-addr=127.0.0.1:{PORT} --rc-no-auth"
@@ -14139,7 +14178,7 @@
         },
         {
           "issue": "Missing runtime or dependency error during preflight",
-          "fix": "Verify linux-x64 / arm64, curl, unzip are installed on the host machine before launching."
+          "fix": "Verify Windows / macOS / Linux are installed on the host machine before launching."
         },
         {
           "issue": "Health check fails right after launch",
@@ -14326,7 +14365,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch mealie-next https://github.com/mealie-recipes/mealie.git {DIR}",
@@ -14443,10 +14482,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Grocy via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/public"
@@ -14672,10 +14711,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which php || # Install Firefly III via system package manager"
+          "# Ensure php is installed on PATH for your OS"
         ],
         "start": [
           "php -S 127.0.0.1:{PORT} -t {DATA_DIR}/public"
@@ -14787,7 +14826,6 @@
       "installCommands": {
         "mode": "python",
         "prepare": [
-          "mkdir -p {DIR}/data",
           "python3 -m venv {DIR}/.venv"
         ],
         "install": [
@@ -14900,7 +14938,7 @@
       "installCommands": {
         "mode": "git",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
           "git clone --depth 1 --branch master https://github.com/Koenkk/zigbee2mqtt.git {DIR}",
@@ -15013,10 +15051,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which mosquitto || # Install Mosquitto via system package manager"
+          "# Ensure mosquitto is installed on PATH for your OS"
         ],
         "start": [
           "mosquitto -p {PORT}"
@@ -15242,10 +15280,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which java || # Install Kestra via system package manager"
+          "# Ensure java is installed on PATH for your OS"
         ],
         "start": [
           "java -jar {DIR}/kestra.jar server standalone"
@@ -15353,10 +15391,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which windmill || # Install Windmill via system package manager"
+          "# Ensure windmill is installed on PATH for your OS"
         ],
         "start": [
           "windmill"
@@ -15470,10 +15508,10 @@
       "installCommands": {
         "mode": "system",
         "prepare": [
-          "mkdir -p {DIR}/data"
+          "Prepare isolated {DATA_DIR}"
         ],
         "install": [
-          "which temporal || # Install Temporal via system package manager"
+          "# Ensure temporal is installed on PATH for your OS"
         ],
         "start": [
           "temporal server start-dev --port 7233 --ui-port {PORT}"

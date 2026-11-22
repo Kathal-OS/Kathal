@@ -1,6 +1,7 @@
+const fs = require('node:fs')
 const path = require('node:path')
 const http = require('node:http')
-const { spawn } = require('node:child_process')
+const { execFileSync, spawn } = require('node:child_process')
 const { app, BrowserWindow, Menu, shell } = require('electron')
 
 const PORT = Number(process.env.PORT) || 3000
@@ -27,14 +28,17 @@ async function ensureBackendRunning() {
   if (await checkServerReady()) return
 
   const rootDir = path.resolve(__dirname, '..')
-  const isWindows = process.platform === 'win32'
-  const cmd = isWindows ? 'npx.cmd' : 'npx'
+  const tsxCli = path.join(rootDir, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+  const serverEntry = path.join(rootDir, 'server.ts')
+  const launchArgs = fs.existsSync(tsxCli) ? [tsxCli, serverEntry] : [serverEntry]
 
-  backendProcess = spawn(cmd, ['tsx', 'server.ts'], {
+  backendProcess = spawn(process.execPath, launchArgs, {
     cwd: rootDir,
     shell: false,
+    windowsHide: true,
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       PORT: String(PORT),
       NODE_ENV: process.env.NODE_ENV || 'production',
     },
@@ -110,9 +114,9 @@ function createWindow() {
     height: 880,
     minWidth: 1024,
     minHeight: 680,
-    backgroundColor: '#0B0F17',
-    title: 'KATHAL — Local App & Server Control Panel',
-    icon: iconPath,
+    backgroundColor: '#080C08',
+    title: 'KATHAL — Self-Hosted App & Server Control Panel',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     webPreferences: {
       contextIsolation: true,
@@ -166,14 +170,18 @@ app.whenReady().then(async () => {
 })
 
 function cleanupBackend() {
-  if (backendProcess && !backendProcess.killed) {
-    try {
+  if (!backendProcess) return
+  const pid = backendProcess.pid
+  try {
+    if (process.platform === 'win32' && pid) {
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+    } else if (!backendProcess.killed) {
       backendProcess.kill('SIGTERM')
-    } catch {
-      // ignore
     }
-    backendProcess = null
+  } catch {
+    // ignore already-exited process
   }
+  backendProcess = null
 }
 
 app.on('before-quit', cleanupBackend)

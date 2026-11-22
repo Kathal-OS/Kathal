@@ -64,6 +64,10 @@ export interface AppInstallSpec {
   binaryUrls?: {
     linux_x64?: string
     linux_arm64?: string
+    darwin_x64?: string
+    darwin_arm64?: string
+    win32_x64?: string
+    win32_arm64?: string
   }
   binaryName?: string
   binaryArchive?: 'zip' | 'tar.gz' | 'bz2' | 'raw'
@@ -187,35 +191,59 @@ function buildInstallCommands(input: ServiceTemplateInput, defaultPort: number):
 
   if (input.installMethod === 'python-venv') {
     const pkg = spec.pythonPackage || input.id
-    const bin = spec.pythonBin || 'python3'
+    const bin = spec.pythonBin || 'python'
     const args = (spec.pythonArgs || []).join(' ')
+    const isWin = process.platform === 'win32'
+    const pyCmd = isWin ? 'python' : 'python3'
+    const venvBin = isWin ? '{DIR}\\.venv\\Scripts' : '{DIR}/.venv/bin'
     return {
       mode: 'python',
-      prepare: ['mkdir -p {DIR}/data', 'python3 -m venv {DIR}/.venv'],
-      install: [`{DIR}/.venv/bin/pip install --no-input ${pkg}`],
-      start: [`{DIR}/.venv/bin/${bin}${args ? ` ${args}` : ''}`],
+      prepare: [`${pyCmd} -m venv {DIR}/.venv`],
+      install: [`${venvBin}/pip install --no-input ${pkg}`],
+      start: [`${venvBin}/${bin}${args ? ` ${args}` : ''}`],
       env,
     }
   }
 
   if (input.installMethod === 'binary-download') {
-    const url = spec.binaryUrls?.linux_x64 || spec.binaryUrls?.linux_arm64 || ''
-    const archive = spec.binaryArchive || 'raw'
+    const archKey =
+      process.platform === 'win32'
+        ? 'win32_x64'
+        : process.platform === 'darwin'
+        ? process.arch === 'arm64'
+          ? 'darwin_arm64'
+          : 'darwin_x64'
+        : process.arch === 'arm64'
+        ? 'linux_arm64'
+        : 'linux_x64'
+    const url =
+      spec.binaryUrls?.[archKey] ||
+      spec.binaryUrls?.linux_x64 ||
+      spec.binaryUrls?.darwin_arm64 ||
+      spec.binaryUrls?.win32_x64 ||
+      ''
+    const archive = url.endsWith('.zip')
+      ? 'zip'
+      : url.endsWith('.tar.gz') || url.endsWith('.tgz')
+      ? 'tar.gz'
+      : url.endsWith('.bz2')
+      ? 'bz2'
+      : spec.binaryArchive || 'raw'
     const binName = spec.binaryName || input.id
     const args = (spec.binaryArgs || []).join(' ')
     const extractStep =
       archive === 'zip'
-        ? 'unzip -o {DIR}/download.zip -d {DIR}/bin'
+        ? 'Extract ZIP into {DIR}/bin'
         : archive === 'tar.gz'
         ? 'tar -xzf {DIR}/download.tar.gz -C {DIR}/bin'
         : archive === 'bz2'
         ? 'bzip2 -df {DIR}/download.bz2'
-        : `chmod +x {DIR}/bin/${binName}`
+        : `chmod +x {DIR}/bin/${binName} (POSIX)`
     return {
       mode: 'binary',
-      prepare: ['mkdir -p {DIR}/bin {DIR}/data'],
+      prepare: ['mkdir {DIR}/bin', 'mkdir {DATA_DIR}'],
       install: url
-        ? [`curl -fsSL --proto =https --tlsv1.2 -o {DIR}/${archive === 'raw' ? `bin/${binName}` : `download.${archive}`} ${url}`, extractStep]
+        ? [`Download ${url}`, extractStep]
         : [`# Download ${input.name} binary from ${input.github}/releases`],
       start: [`{DIR}/bin/${binName}${args ? ` ${args}` : ''}`],
       env,
@@ -227,7 +255,7 @@ function buildInstallCommands(input: ServiceTemplateInput, defaultPort: number):
     const branch = spec.gitBranch || 'main'
     return {
       mode: 'git',
-      prepare: ['mkdir -p {DIR}/data'],
+      prepare: ['Prepare isolated {DATA_DIR}'],
       install: [`git clone --depth 1 --branch ${branch} ${repo} {DIR}`, 'npm install --no-audit --no-fund --omit=dev'],
       start: [input.command || 'npm run start'],
       env,
@@ -239,8 +267,8 @@ function buildInstallCommands(input: ServiceTemplateInput, defaultPort: number):
     const args = (spec.systemArgs || []).join(' ')
     return {
       mode: 'system',
-      prepare: ['mkdir -p {DIR}/data'],
-      install: [`which ${bin} || # Install ${input.name} via system package manager`],
+      prepare: ['Prepare isolated {DATA_DIR}'],
+      install: [`# Ensure ${bin} is installed on PATH for your OS`],
       start: [`${bin}${args ? ` ${args}` : ''}`],
       env,
     }
@@ -293,11 +321,11 @@ export function hydrateTemplate(input: ServiceTemplateInput, index: number): Ser
       : input.installMethod === 'npm'
       ? ['node >= 18', 'npm']
       : input.installMethod === 'python-venv'
-      ? ['python3 >= 3.10', 'python3-venv', 'pip']
+      ? ['python >= 3.10', 'venv', 'pip']
       : input.installMethod === 'git'
       ? ['git', 'node >= 18']
       : input.installMethod === 'binary-download'
-      ? ['linux-x64 / arm64', 'curl']
+      ? ['Windows / macOS / Linux']
       : input.installMethod === 'docker-required'
       ? ['docker', 'docker-compose']
       : [input.runtime]
