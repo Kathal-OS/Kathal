@@ -87,14 +87,16 @@ export default function Monitoring() {
 
   const cpuPct = current?.cpu?.percent ?? 0
   const memPct = current?.memory?.percent ?? 0
-  const cpuColor = cpuPct > 80 ? '#f87171' : cpuPct > 50 ? '#facc15' : '#4ade80'
-  const memColor = memPct > 80 ? '#f87171' : memPct > 50 ? '#facc15' : '#4ade80'
+  const diskPct = current?.disk?.percent ?? 0
+  const cpuColor = cpuPct >= 85 ? '#ef4444' : cpuPct >= 65 ? '#eab308' : '#22c55e'
+  const memColor = memPct >= 85 ? '#ef4444' : memPct >= 65 ? '#eab308' : '#22c55e'
+  const diskColor = diskPct >= 85 ? '#ef4444' : diskPct >= 65 ? '#eab308' : '#22c55e'
 
   return (
     <div className="p-8">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">System Monitoring</h1>
-        <p className="text-gray-500 mt-1">Live host telemetry and per-container resource consumption</p>
+        <p className="text-gray-400 mt-1">Live host telemetry and per-container resource consumption</p>
       </div>
 
       {loading && !current ? (
@@ -120,7 +122,7 @@ export default function Monitoring() {
             </div>
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <p className="text-xs text-gray-400">Disk</p>
-              <p className="text-2xl font-bold tabular-nums mt-1 text-blue-400">
+              <p className="text-2xl font-bold tabular-nums mt-1" style={{ color: diskColor }}>
                 {formatPercent(current?.disk?.percent)}
               </p>
               <p className="text-xs text-gray-500 mt-1">
@@ -129,7 +131,7 @@ export default function Monitoring() {
             </div>
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <p className="text-xs text-gray-400">Network</p>
-              <p className="text-lg font-bold tabular-nums mt-1 text-purple-400">
+              <p className="text-lg font-bold tabular-nums mt-1 text-yellow-400">
                 {formatBytes(current?.network?.bytesRecv || 0)} ↓ / {formatBytes(current?.network?.bytesSent || 0)} ↑
               </p>
               <p className="text-xs text-gray-500 mt-1">Cumulative I/O</p>
@@ -188,8 +190,8 @@ export default function Monitoring() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Sparkline data={history.map((h) => h.cpu?.percent || 0)} color={cpuColor} label="CPU %" />
                 <Sparkline data={history.map((h) => h.memory?.percent || 0)} color={memColor} label="Memory %" />
-                <Sparkline data={history.map((h) => (h.network?.bytesRecv || 0) / 1024)} color="#60a5fa" label="Net Recv KB" />
-                <Sparkline data={history.map((h) => (h.network?.bytesSent || 0) / 1024)} color="#a78bfa" label="Net Sent KB" />
+                <Sparkline data={history.map((h) => (h.network?.bytesRecv || 0) / 1024)} color="#22c55e" label="Net Recv KB" />
+                <Sparkline data={history.map((h) => (h.network?.bytesSent || 0) / 1024)} color="#eab308" label="Net Sent KB" />
               </div>
             </div>
           )}

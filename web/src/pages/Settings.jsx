@@ -146,7 +146,7 @@ export default function Settings() {
           )}
 
           {/* Server & Domain Routing */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
             <h2 className="text-lg font-semibold text-slate-100 mb-1">Server &amp; Domain Routing</h2>
             <p className="text-xs text-slate-400 mb-4">
               Used when assigning automatic web addresses to newly launched apps.
@@ -187,7 +187,7 @@ export default function Settings() {
 
           {/* SSL / Reverse Proxy & Deployment Automation */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-100">Reverse Proxy &amp; SSL</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Automatic HTTPS certificates for routed apps</p>
@@ -227,7 +227,7 @@ export default function Settings() {
               </label>
             </div>
 
-            <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-100">Deployment Pipeline &amp; Webhooks</h2>
                 <p className="text-xs text-slate-400 mt-0.5">Control rollout behavior and Git auto-deploy</p>
@@ -343,7 +343,7 @@ export default function Settings() {
       )}
 
       {/* System Info */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
         <h2 className="text-lg font-semibold text-slate-100 mb-4">System</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
@@ -368,7 +368,7 @@ export default function Settings() {
       </div>
 
       {/* Desktop App Support */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-kathal-600/15 border border-kathal-500/30 flex items-center justify-center text-kathal-400 shrink-0">
@@ -411,7 +411,7 @@ export default function Settings() {
       </div>
 
       {/* Quick Deploy */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold text-slate-100">Quick Deploy</h2>
           <Link to="/containers" className="text-xs text-kathal-400 hover:text-kathal-300">
@@ -460,7 +460,7 @@ export default function Settings() {
       </div>
 
       {/* Install on other platforms */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
         <div className="flex items-center gap-2 mb-4">
           <Terminal className="w-4 h-4 text-slate-400" />
           <h2 className="text-lg font-semibold text-slate-100">Install on Other Servers</h2>
@@ -498,7 +498,7 @@ export default function Settings() {
       </div>
 
       {/* Danger Zone */}
-      <div className="bg-[#111827] border border-red-500/30 rounded-xl p-6">
+      <div className="bg-[#101A10] border border-red-500/30 rounded-xl p-6">
         <div className="flex items-center gap-2 mb-3 text-red-400">
           <AlertTriangle className="w-4 h-4" />
           <h2 className="text-lg font-semibold">Danger Zone</h2>

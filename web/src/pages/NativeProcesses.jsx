@@ -197,7 +197,7 @@ export default function NativeProcesses() {
 
       {/* Telemetry Summary Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Running Processes</span>
             <Terminal className="w-4 h-4 text-slate-500" />
@@ -210,7 +210,7 @@ export default function NativeProcesses() {
           </p>
         </div>
 
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Process CPU Usage</span>
             <Cpu className="w-4 h-4 text-slate-500" />
@@ -223,7 +223,7 @@ export default function NativeProcesses() {
           </p>
         </div>
 
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Process Memory (RSS)</span>
             <MemoryStick className="w-4 h-4 text-slate-500" />
@@ -236,7 +236,7 @@ export default function NativeProcesses() {
           </p>
         </div>
 
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Execution Mode</span>
             <Clock className="w-4 h-4 text-slate-500" />
@@ -263,7 +263,7 @@ export default function NativeProcesses() {
       {/* Filter & Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 p-1 rounded-lg">
+          <div className="flex items-center gap-1 bg-[#101A10] border border-slate-800 p-1 rounded-lg">
             {[
               { id: 'all', label: 'All Native' },
               { id: 'service-engine', label: 'Service Engine' },
@@ -285,7 +285,7 @@ export default function NativeProcesses() {
             ))}
           </div>
 
-          <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 p-1 rounded-lg">
+          <div className="flex items-center gap-1 bg-[#101A10] border border-slate-800 p-1 rounded-lg">
             <button
               type="button"
               onClick={() => setRunningOnly(true)}
@@ -312,19 +312,19 @@ export default function NativeProcesses() {
           placeholder="Filter by name, PID, command, or port..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-72"
+          className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-72"
         />
       </div>
 
       {/* Process Table */}
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-3">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-11 bg-slate-900/60 rounded-lg animate-pulse" />
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
           <Terminal className="w-10 h-10 text-slate-500 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-100">No Running Native Processes</h2>
           <p className="text-sm text-slate-400 max-w-md mx-auto">
@@ -340,7 +340,7 @@ export default function NativeProcesses() {
           </button>
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-800/50 border-b border-slate-800">
               <tr>
@@ -527,7 +527,7 @@ export default function NativeProcesses() {
           <form
             onSubmit={handleSpawn}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl"
           >
             <div>
               <h2 className="text-xl font-bold text-slate-100">Launch Native Binary Process</h2>
@@ -637,7 +637,7 @@ export default function NativeProcesses() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col"
           >
             <div className="flex items-center justify-between mb-4">
               <div>

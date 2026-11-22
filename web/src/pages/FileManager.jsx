@@ -162,7 +162,7 @@ export default function FileManager() {
         <div className="flex gap-2 shrink-0">
           <button
             onClick={() => setShowMkdir((v) => !v)}
-            className="inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
+            className="inline-flex items-center gap-1.5 bg-[#101A10] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
           >
             <FolderPlus className="w-4 h-4 text-slate-400" />
             <span>New Folder</span>
@@ -188,7 +188,7 @@ export default function FileManager() {
       )}
 
       {showMkdir && (
-        <form onSubmit={handleMkdir} className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center gap-3">
+        <form onSubmit={handleMkdir} className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center gap-3">
           <input
             type="text"
             value={newFolderName}
@@ -222,7 +222,7 @@ export default function FileManager() {
       </div>
 
       {editor !== null && (
-        <div className="bg-[#111827] border border-kathal-500/40 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-kathal-500/40 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm text-slate-300 font-mono">Editing: {editor}</p>
             <div className="flex gap-2">
@@ -250,15 +250,15 @@ export default function FileManager() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading files...
         </div>
       ) : items.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           This folder is empty.
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-900/70 border-b border-slate-800">
               <tr className="text-xs text-slate-400 uppercase tracking-wider">

@@ -267,23 +267,23 @@ export default function ProxyManager() {
 
       {/* Summary Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4">
           <p className="text-xs text-slate-400">Active Proxy Rules</p>
           <p className="text-2xl font-bold text-slate-100 tabular-nums mt-1">
             {activeCount} <span className="text-xs font-normal text-slate-500">/ {routes.length}</span>
           </p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4">
           <p className="text-xs text-slate-400">HTTPS Metadata</p>
           <p className="text-2xl font-bold text-slate-100 tabular-nums mt-1">{sslCount}</p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4">
           <p className="text-xs text-slate-400">JSON Config File</p>
           <p className="text-xs font-mono font-semibold text-green-400 truncate mt-2">
             {jsonConfig?.relativePath || 'data/reverse-proxy.json'}
           </p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4">
           <p className="text-xs text-slate-400">Wildcard Suffix</p>
           <p className="text-sm font-mono font-semibold text-slate-200 truncate mt-2">
             .{proxySettings?.wildcardDomain || 'apps.kathal.local'}
@@ -292,7 +292,7 @@ export default function ProxyManager() {
       </div>
 
       {/* Segmented Navigation */}
-      <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 p-1 rounded-lg w-fit">
+      <div className="flex items-center gap-1 bg-[#101A10] border border-slate-800 p-1 rounded-lg w-fit">
         <button
           type="button"
           onClick={() => setActiveTab('routes')}
@@ -332,7 +332,7 @@ export default function ProxyManager() {
       {activeTab === 'settings' ? (
         <form
           onSubmit={handleSaveSettings}
-          className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-5"
+          className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-5"
         >
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Reverse Proxy Global Settings</h2>
@@ -439,7 +439,7 @@ export default function ProxyManager() {
           {/* Persistent Domain-to-Port Configuration Panel */}
           <form
             onSubmit={handleSaveRoute}
-            className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4"
+            className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-4"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -588,11 +588,11 @@ export default function ProxyManager() {
 
           {/* Active Routes List */}
           {loading ? (
-            <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
               Loading domain routes...
             </div>
           ) : routes.length === 0 ? (
-            <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-10 text-center space-y-2">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-10 text-center space-y-2">
               <Globe className="w-9 h-9 text-slate-600 mx-auto" />
               <p className="text-slate-200 text-base font-semibold">No domain mappings saved yet</p>
               <p className="text-slate-400 text-sm">
@@ -606,7 +606,7 @@ export default function ProxyManager() {
                 return (
                   <div
                     key={route.id}
-                    className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3"
+                    className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3"
                   >
                     <div className="flex items-center gap-3.5 min-w-0">
                       <span
@@ -725,7 +725,7 @@ export default function ProxyManager() {
           )}
 
           {/* Persisted JSON File Preview Card */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5 space-y-3">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <FileJson className="w-4 h-4 text-kathal-400" />

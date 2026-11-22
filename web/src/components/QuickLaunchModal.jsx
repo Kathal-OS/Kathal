@@ -150,7 +150,7 @@ export default function QuickLaunchModal({ open, onClose, onDeployed }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#111827] border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+        className="bg-[#101A10] border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
       >
         <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
           <div>

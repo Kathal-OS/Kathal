@@ -9,8 +9,8 @@
 
   body {
     font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
-    background-color: #0b0f17;
-    color: #f1f5f9;
+    background-color: #080c08;
+    color: #eaf2e6;
     letter-spacing: 0.005em;
   }
 
@@ -25,28 +25,28 @@
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid #e0644d;
+    outline: 2px solid #facc15;
     outline-offset: 2px;
   }
 }
 
-/* Subtle dark scrollbar */
+/* Jackfruit rind & moss scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0b0f17;
+  background: #080c08;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #1d2b1a;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #2d3f28;
 }
 
 @media (prefers-reduced-motion: reduce) {

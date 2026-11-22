@@ -112,12 +112,12 @@ export default function Backups() {
         <div className="flex flex-wrap gap-2 shrink-0">
           <button
             onClick={handleExport}
-            className="inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
+            className="inline-flex items-center gap-1.5 bg-[#101A10] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm whitespace-nowrap transition-colors"
           >
             <Download className="w-4 h-4 text-slate-400" />
             <span>Export All</span>
           </button>
-          <label className="inline-flex items-center gap-1.5 bg-[#111827] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm cursor-pointer whitespace-nowrap transition-colors">
+          <label className="inline-flex items-center gap-1.5 bg-[#101A10] hover:bg-slate-800 border border-slate-800 text-slate-200 px-3.5 py-2 rounded-lg text-sm cursor-pointer whitespace-nowrap transition-colors">
             <Upload className="w-4 h-4 text-slate-400" />
             <span>Import</span>
             <input type="file" accept=".zip,.json" className="hidden" onChange={handleImport} />
@@ -145,7 +145,7 @@ export default function Backups() {
       )}
 
       {showCreateForm && (
-        <form onSubmit={handleCreate} className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center gap-3">
+        <form onSubmit={handleCreate} className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center gap-3">
           <input
             type="text"
             value={backupName}
@@ -171,11 +171,11 @@ export default function Backups() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading backups...
         </div>
       ) : backups.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
           <Archive className="w-10 h-10 text-slate-600 mx-auto" />
           <p className="text-slate-200 text-lg font-semibold">No backups yet</p>
           <p className="text-slate-400 text-sm">Create your first backup snapshot to keep your data safe.</p>
@@ -183,7 +183,7 @@ export default function Backups() {
       ) : (
         <div className="space-y-3">
           {backups.map((b) => (
-            <div key={b.id} className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+            <div key={b.id} className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3.5">
                 <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-kathal-400 shrink-0">
                   <Archive className="w-4 h-4" />

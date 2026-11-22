@@ -240,7 +240,7 @@ export default function AppDetail() {
   if (loading) {
     return (
       <div className="p-6 sm:p-8 max-w-7xl mx-auto">
-        <div className="bg-[#111827] border border-slate-800 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading application details...
         </div>
       </div>
@@ -258,7 +258,7 @@ export default function AppDetail() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back to App Store</span>
         </button>
-        <div className="bg-[#111827] border border-red-500/30 rounded-xl p-8 text-center">
+        <div className="bg-[#101A10] border border-red-500/30 rounded-xl p-8 text-center">
           <h1 className="text-xl font-semibold text-slate-100">Application Not Found</h1>
           <p className="text-sm text-slate-400 mt-2">{error || 'This application template does not exist.'}</p>
         </div>
@@ -293,7 +293,7 @@ export default function AppDetail() {
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium whitespace-nowrap transition-colors ${
             isFav
               ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
-              : 'bg-[#111827] border-slate-800 text-slate-300 hover:border-slate-700'
+              : 'bg-[#101A10] border-slate-800 text-slate-300 hover:border-slate-700'
           }`}
         >
           <Star className={`w-3.5 h-3.5 ${isFav ? 'fill-amber-400 text-amber-400' : ''}`} />
@@ -302,7 +302,7 @@ export default function AppDetail() {
       </div>
 
       {/* Hero Header */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
         <div className="flex items-start gap-4 min-w-0">
           <div
             className="w-16 h-16 rounded-2xl border border-slate-700/80 flex items-center justify-center text-3xl shrink-0"
@@ -381,7 +381,7 @@ export default function AppDetail() {
         <div className="lg:col-span-2 space-y-6">
           {/* Active Installation Telemetry / Logs */}
           {inst && (
-            <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-100">
@@ -520,7 +520,7 @@ export default function AppDetail() {
           )}
 
           {/* Overview & Features */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-5">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-5">
             <div>
               <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
               <p className="text-sm text-slate-300 leading-relaxed mt-2">{app.overview}</p>
@@ -540,7 +540,7 @@ export default function AppDetail() {
           </div>
 
           {/* Screenshots / Workspace Preview */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-slate-100">Interface &amp; Architecture Preview</h2>
               <span className="text-xs text-slate-400 capitalize">{app.category} workspace</span>
@@ -581,7 +581,7 @@ export default function AppDetail() {
           </div>
 
           {/* Configuration Instructions & Template */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-4">
             <div className="flex items-center gap-2">
               <Wrench className="w-4 h-4 text-slate-400" />
               <h2 className="text-lg font-semibold text-slate-100">Configuration Instructions</h2>
@@ -608,7 +608,7 @@ export default function AppDetail() {
 
           {/* Registry Install Commands & Health Check Definition */}
           {(app.installCommands || app.healthCheck) && (
-            <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+            <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-slate-400" />
@@ -678,7 +678,7 @@ export default function AppDetail() {
           )}
 
           {/* Troubleshooting */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-6 space-y-4">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-6 space-y-4">
             <h2 className="text-lg font-semibold text-slate-100">Troubleshooting</h2>
             <div className="divide-y divide-slate-800/80">
               {(app.troubleshooting || []).map((item, idx) => (
@@ -694,7 +694,7 @@ export default function AppDetail() {
         {/* Right Sidebar: Requirements, Specs & One-Click Installer */}
         <div className="space-y-6">
           {/* System Specifications */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-5 space-y-4">
             <h2 className="text-base font-semibold text-slate-100">System Specifications</h2>
             <dl className="space-y-2.5 text-xs">
               <div className="flex justify-between gap-3">
@@ -735,7 +735,7 @@ export default function AppDetail() {
           </div>
 
           {/* Host Preflight Readiness */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-5 space-y-3">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-base font-semibold text-slate-100">System Requirements</h2>
               {preflight?.installable ? (
@@ -777,7 +777,7 @@ export default function AppDetail() {
           </div>
 
           {/* Install / Manage Panel */}
-          <div className="bg-[#111827] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+          <div className="bg-[#101A10] border border-slate-800/90 rounded-2xl p-5 space-y-4">
             <h2 className="text-base font-semibold text-slate-100">
               {inst ? 'Manage Installation' : 'One-Click Installation'}
             </h2>

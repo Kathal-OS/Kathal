@@ -60,15 +60,18 @@ export default function Login({ onLogin, sessionNotice = '' }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-[#080C08] flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md space-y-6">
         {/* Brand */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-kathal-600 shadow-lg mb-2">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="6" rx="1.5" fill="white" />
-              <rect x="3" y="13" width="10" height="7" rx="1.5" fill="white" fillOpacity="0.9" />
-              <rect x="16" y="13" width="5" height="7" rx="1.5" fill="white" fillOpacity="0.7" />
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2.5V5" stroke="#FACC15" strokeWidth="2" strokeLinecap="round" />
+              <path d="M12.4 4.2c2.2-1.4 5-.9 6 .7-2 1-4.5.8-6-.7z" fill="#86EFAC" />
+              <path d="M12 5c4.5 0 7 3.2 7 7.8 0 4.8-2.9 8.7-7 8.7s-7-3.9-7-8.7C5 8.2 7.5 5 12 5z" fill="#113F1B" stroke="#86EFAC" strokeWidth="1.4" />
+              <ellipse cx="10.2" cy="11.8" rx="1.6" ry="2.4" transform="rotate(-14 10.2 11.8)" fill="#FACC15" />
+              <ellipse cx="13.8" cy="12" rx="1.6" ry="2.4" transform="rotate(14 13.8 12)" fill="#FDE047" />
+              <ellipse cx="12" cy="16" rx="1.7" ry="2.2" fill="#EAB308" />
             </svg>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-100">KATHAL</h1>
@@ -80,7 +83,7 @@ export default function Login({ onLogin, sessionNotice = '' }) {
         {/* Auth Card */}
         <form
           onSubmit={handleSubmit}
-          className="bg-[#111827] border border-slate-800 rounded-2xl p-7 space-y-5"
+          className="bg-[#101A10] border border-slate-800 rounded-2xl p-7 space-y-5"
         >
           <div>
             <h2 className="text-lg font-semibold text-slate-100">

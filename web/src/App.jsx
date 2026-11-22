@@ -86,7 +86,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#0B0F17] text-slate-100 overflow-hidden">
+    <div className="flex h-screen bg-[#080C08] text-slate-100 overflow-hidden">
       <Sidebar
         user={user}
         onLogout={handleLogout}

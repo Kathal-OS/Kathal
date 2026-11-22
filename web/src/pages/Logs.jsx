@@ -93,7 +93,7 @@ export default function Logs() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* App List */}
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4">
           <h2 className="text-sm font-semibold text-slate-300 mb-3">Installed Apps</h2>
           {containers.length === 0 ? (
             <div className="text-center text-slate-500 py-8 text-sm">
@@ -127,7 +127,7 @@ export default function Logs() {
         </div>
 
         {/* Logs View */}
-        <div className="lg:col-span-3 bg-[#111827] border border-slate-800/90 rounded-xl flex flex-col h-[70vh] min-h-[420px]">
+        <div className="lg:col-span-3 bg-[#101A10] border border-slate-800/90 rounded-xl flex flex-col h-[70vh] min-h-[420px]">
           {!selectedContainer ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-sm gap-2">
               <FileText className="w-8 h-8 text-slate-600" />

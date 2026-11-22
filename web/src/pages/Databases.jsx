@@ -113,7 +113,7 @@ export default function Databases() {
       )}
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 space-y-4">
+        <form onSubmit={handleCreate} className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 space-y-4">
           <div>
             <h2 className="text-base font-semibold text-slate-100">New Managed Database</h2>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -168,7 +168,7 @@ export default function Databases() {
       )}
 
       {connStr && (
-        <div className="bg-[#111827] border border-kathal-500/40 rounded-xl p-4">
+        <div className="bg-[#101A10] border border-kathal-500/40 rounded-xl p-4">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <p className="text-xs font-medium text-slate-400 mb-1">Database Connection String (URI)</p>
@@ -189,11 +189,11 @@ export default function Databases() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading managed databases...
         </div>
       ) : databases.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
           <Database className="w-10 h-10 text-slate-600 mx-auto" />
           <p className="text-slate-200 text-lg font-semibold">No databases running</p>
           <p className="text-slate-400 text-sm">Create a database above to get a ready-to-use connection URL.</p>
@@ -204,7 +204,7 @@ export default function Databases() {
             const typeInfo = DB_TYPES.find((t) => t.value === db.type) || DB_TYPES[0]
             const running = db.status === 'running'
             return (
-              <div key={db.id} className="bg-[#111827] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div key={db.id} className="bg-[#101A10] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3.5">
                   <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-kathal-400 shrink-0">
                     <Database className="w-4 h-4" />

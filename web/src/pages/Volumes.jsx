@@ -166,7 +166,7 @@ export default function Volumes() {
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           {confirmPrune ? (
-            <div className="inline-flex items-center gap-1.5 bg-[#111827] border border-red-500/40 rounded-lg px-2 py-1">
+            <div className="inline-flex items-center gap-1.5 bg-[#101A10] border border-red-500/40 rounded-lg px-2 py-1">
               <button
                 onClick={handlePruneUnused}
                 disabled={busyAction === 'prune'}
@@ -187,7 +187,7 @@ export default function Volumes() {
             <button
               onClick={() => setConfirmPrune(true)}
               disabled={stats.unused === 0 || busyAction === 'prune'}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-500/15 hover:bg-red-600 disabled:bg-[#111827] disabled:text-slate-600 disabled:border disabled:border-slate-800 text-red-400 hover:text-white rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-500/15 hover:bg-red-600 disabled:bg-[#101A10] disabled:text-slate-600 disabled:border disabled:border-slate-800 text-red-400 hover:text-white rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
             >
               <Trash2 className="w-4 h-4" />
               <span>Prune Unused Volumes ({stats.unused})</span>
@@ -205,14 +205,14 @@ export default function Volumes() {
 
       {/* Summary Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Total Volumes</span>
             <HardDrive className="w-4 h-4 text-slate-500" />
           </div>
           <p className="text-2xl font-bold text-slate-100 tabular-nums">{stats.total}</p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Total Storage</span>
             <Database className="w-4 h-4 text-slate-500" />
@@ -221,14 +221,14 @@ export default function Volumes() {
             {formatBytes(stats.totalBytes)}
           </p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Mounted / In Use</span>
             <CheckCircle2 className="w-4 h-4 text-green-500/70" />
           </div>
           <p className="text-2xl font-bold text-green-400 tabular-nums">{stats.inUse}</p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-400">Reclaimable</span>
             <Trash2 className="w-4 h-4 text-amber-400/70" />
@@ -246,7 +246,7 @@ export default function Volumes() {
             aria-label="Filter volumes by usage"
             value={usageFilter}
             onChange={(e) => setUsageFilter(e.target.value)}
-            className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             <option value="all">All Volumes ({stats.total})</option>
             <option value="unused">Unused ({stats.unused})</option>
@@ -255,7 +255,7 @@ export default function Volumes() {
           <button
             onClick={loadVolumes}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#111827] hover:bg-slate-800 border border-slate-800 rounded-lg text-sm text-slate-300 disabled:opacity-50 whitespace-nowrap shrink-0 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#101A10] hover:bg-slate-800 border border-slate-800 rounded-lg text-sm text-slate-300 disabled:opacity-50 whitespace-nowrap shrink-0 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -269,7 +269,7 @@ export default function Volumes() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search volumes by name or path..."
-            className="w-full pl-9 pr-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
+            className="w-full pl-9 pr-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
           />
         </div>
       </div>
@@ -287,11 +287,11 @@ export default function Volumes() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading persistent storage volumes...
         </div>
       ) : filteredVolumes.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
           <HardDrive className="w-10 h-10 text-slate-600 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-200">
             {volumes.length === 0 ? 'No Storage Volumes Found' : 'No Volumes Match Filter'}
@@ -303,7 +303,7 @@ export default function Volumes() {
           </p>
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-900/70 border-b border-slate-800">
               <tr>
@@ -448,7 +448,7 @@ export default function Volumes() {
           <form
             onSubmit={handleCreate}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
           >
             <div>
               <h3 className="text-xl font-bold text-slate-100">Create Storage Volume</h3>

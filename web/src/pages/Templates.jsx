@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Database,
@@ -125,6 +125,21 @@ export default function Templates() {
     loadCatalog()
   }, [loadCatalog])
 
+  const searchInputRef = useRef(null)
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const tag = (e.target?.tagName || '').toLowerCase()
+        if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+          e.preventDefault()
+          searchInputRef.current?.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Poll active modal installation progress
   useEffect(() => {
     if (!activeInstall || activeInstall.installStatus !== 'installing') return
@@ -163,11 +178,13 @@ export default function Templates() {
       if (quickTab === 'favorites' && !favorites.includes(t.id)) return false
       if (quickTab === 'installed' && !installationByTemplate.has(t.id)) return false
       if (q) {
+        const catLabel = (categoryDefs[t.category]?.label || '').toLowerCase()
         const matches =
           t.name.toLowerCase().includes(q) ||
           t.id.toLowerCase().includes(q) ||
           t.description.toLowerCase().includes(q) ||
           t.category.toLowerCase().includes(q) ||
+          catLabel.includes(q) ||
           t.runtime.toLowerCase().includes(q) ||
           t.compatibility.toLowerCase().includes(q) ||
           (t.tags || []).some((tag) => tag.toLowerCase().includes(q))
@@ -185,7 +202,7 @@ export default function Templates() {
       sorted.sort((a, b) => (b.popularity || 0) - (a.popularity || 0) || a.name.localeCompare(b.name))
     }
     return sorted
-  }, [templates, filterCat, filterCompat, filterDifficulty, quickTab, favorites, installationByTemplate, search, sortBy])
+  }, [templates, categoryDefs, filterCat, filterCompat, filterDifficulty, quickTab, favorites, installationByTemplate, search, sortBy])
 
   function toggleFavorite(e, id) {
     e.preventDefault()
@@ -280,19 +297,49 @@ export default function Templates() {
           <div className="relative w-full sm:w-72">
             <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
-              type="search"
-              placeholder="Search 100+ apps, runtimes, tags..."
+              ref={searchInputRef}
+              type="text"
+              role="searchbox"
+              aria-label="Search registry applications by name or category"
+              placeholder="Search by app name or category (/)..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
+              className="w-full pl-9 pr-8 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search query"
+                className="p-1 text-slate-400 hover:text-slate-200 absolute right-2 top-1/2 -translate-y-1/2"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+
+          <select
+            aria-label="Filter registry by category"
+            value={filterCat}
+            onChange={(e) => setFilterCat(e.target.value)}
+            className="bg-[#101A10] border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
+          >
+            <option value="">All Categories ({totalCount})</option>
+            {Object.entries(categoryDefs).map(([key, def]) => {
+              const count = categories[key] || 0
+              return count ? (
+                <option key={key} value={key}>
+                  {def.label} ({count})
+                </option>
+              ) : null
+            })}
+          </select>
 
           <select
             aria-label="Sort applications"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="bg-[#111827] border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="bg-[#101A10] border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             <option value="popular">Sort: Popularity</option>
             <option value="alpha">Sort: Alphabetical (A–Z)</option>
@@ -303,7 +350,7 @@ export default function Templates() {
             type="button"
             onClick={handleReloadRegistry}
             disabled={reloadingRegistry}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#111827] hover:bg-slate-800 border border-slate-800 rounded-lg text-xs text-slate-300 whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#101A10] hover:bg-slate-800 border border-slate-800 rounded-lg text-xs text-slate-300 whitespace-nowrap"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${reloadingRegistry ? 'animate-spin' : ''}`} />
             <span>Reload Registry</span>
@@ -313,7 +360,7 @@ export default function Templates() {
 
       {/* Host Runtime Readiness Bar */}
       {runtimes && (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <span className="text-slate-400 font-medium">Host Runtimes ({runtimes.platform}/{runtimes.arch}):</span>
             {['node', 'npm', 'python3', 'pythonVenv', 'git', 'curl', 'docker', 'java', 'php'].map((key) => {
@@ -331,15 +378,32 @@ export default function Templates() {
               )
             })}
           </div>
-          <span className="text-slate-500 tabular-nums">
-            Showing {filteredTemplates.length} of {totalCount} apps
-          </span>
+          <div className="flex items-center gap-3">
+            {(search || filterCat || filterCompat !== 'All Runtimes' || filterDifficulty || quickTab !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('')
+                  setFilterCat('')
+                  setFilterCompat('All Runtimes')
+                  setFilterDifficulty('')
+                  setQuickTab('all')
+                }}
+                className="text-kathal-400 hover:text-kathal-300 font-medium whitespace-nowrap"
+              >
+                Clear filters
+              </button>
+            )}
+            <span className="text-slate-500 tabular-nums">
+              Showing {filteredTemplates.length} of {totalCount} apps
+            </span>
+          </div>
         </div>
       )}
 
       {/* Quick Collection Tabs + Runtime & Difficulty Filters */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 p-1 bg-[#111827] border border-slate-800 rounded-lg flex-wrap">
+        <div className="flex items-center gap-1 p-1 bg-[#101A10] border border-slate-800 rounded-lg flex-wrap">
           {[
             { id: 'all', label: 'All Apps' },
             { id: 'featured', label: 'Featured' },
@@ -368,7 +432,7 @@ export default function Templates() {
             aria-label="Filter by runtime compatibility"
             value={filterCompat}
             onChange={(e) => setFilterCompat(e.target.value)}
-            className="bg-[#111827] border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="bg-[#101A10] border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             {compatOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
@@ -379,7 +443,7 @@ export default function Templates() {
             aria-label="Filter by installation difficulty"
             value={filterDifficulty}
             onChange={(e) => setFilterDifficulty(e.target.value)}
-            className="bg-[#111827] border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="bg-[#101A10] border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             <option value="">All Difficulty</option>
             <option value="easy">Difficulty: Easy</option>
@@ -397,7 +461,7 @@ export default function Templates() {
           className={`px-3 py-1.5 rounded-lg text-xs font-medium border whitespace-nowrap shrink-0 transition-colors ${
             !filterCat
               ? 'bg-kathal-600 border-kathal-500 text-white'
-              : 'bg-[#111827] border-slate-800 text-slate-400 hover:text-slate-200'
+              : 'bg-[#101A10] border-slate-800 text-slate-400 hover:text-slate-200'
           }`}
         >
           All Categories ({totalCount})
@@ -414,7 +478,7 @@ export default function Templates() {
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border whitespace-nowrap shrink-0 transition-colors ${
                 filterCat === key
                   ? 'bg-kathal-600 border-kathal-500 text-white'
-                  : 'bg-[#111827] border-slate-800 text-slate-400 hover:text-slate-200'
+                  : 'bg-[#101A10] border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -426,11 +490,11 @@ export default function Templates() {
 
       {/* App Grid */}
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading {totalCount || '100+'} applications...
         </div>
       ) : filteredTemplates.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
           <Store className="w-10 h-10 text-slate-600 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-200">No Matching Applications</h2>
           <p className="text-sm text-slate-400">Clear your filters or search query to browse all {totalCount} apps.</p>
@@ -458,7 +522,7 @@ export default function Templates() {
             return (
               <div
                 key={t.id}
-                className="bg-[#111827] border border-slate-800/90 hover:border-slate-700 rounded-xl p-5 flex flex-col justify-between transition-colors"
+                className="bg-[#101A10] border border-slate-800/90 hover:border-slate-700 rounded-xl p-5 flex flex-col justify-between transition-colors"
               >
                 <div className="space-y-3">
                   {/* Top Row: Icon + Title + Favorite */}
@@ -607,7 +671,7 @@ export default function Templates() {
           onClick={() => setSelected(null)}
         >
           <div
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl space-y-5"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl space-y-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">

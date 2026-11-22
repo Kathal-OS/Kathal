@@ -199,7 +199,7 @@ export default function Registries() {
       {/* Quick Private Image Pull Bar */}
       <form
         onSubmit={handlePullPrivate}
-        className="bg-[#111827] border border-slate-800/90 rounded-xl p-5 flex flex-wrap items-end gap-3"
+        className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5 flex flex-wrap items-end gap-3"
       >
         <div className="min-w-[200px] flex-1 max-w-xs">
           <label className="block text-xs text-slate-400 mb-1.5">Authenticate With Registry</label>
@@ -272,17 +272,17 @@ export default function Registries() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, host, or user..."
-            className="w-full pl-9 pr-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
+            className="w-full pl-9 pr-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
           />
         </div>
       </div>
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading Docker registries...
         </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-3">
           <KeyRound className="w-10 h-10 text-slate-600 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-200">
             {registries.length === 0 ? 'No Registries Connected' : 'No Matching Registries'}
@@ -303,7 +303,7 @@ export default function Registries() {
           )}
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-900/70 border-b border-slate-800">
               <tr>
@@ -430,7 +430,7 @@ export default function Registries() {
           <form
             onSubmit={handleSave}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl"
           >
             <div>
               <h3 className="text-xl font-bold text-slate-100">

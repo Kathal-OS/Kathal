@@ -70,7 +70,7 @@ export default function PWAInstallButton({ compact = false }) {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">

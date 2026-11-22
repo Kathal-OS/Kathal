@@ -30,6 +30,7 @@ import { NativeProcessService, type NativeProcessInstance } from './src/nativePr
 import { AppInstallerEngine, detectHostRuntimes, type InstalledAppRecord } from './src/installerEngine.ts'
 import { ServiceManager, type ManagedServiceRecord } from './src/serviceManager.ts'
 import { ProxyConfigManager } from './src/proxyConfig.ts'
+import { collectSystemMonitorData } from './src/systemMonitor.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 3000
@@ -519,6 +520,10 @@ api.get('/system', (_req: Request, res: Response) => {
     goVersion: `Node ${process.version}`,
     hostname: os.hostname(),
   })
+})
+
+api.get('/system/monitor', (_req: Request, res: Response) => {
+  res.json(collectSystemMonitorData())
 })
 
 function handleCheckUpdates(_req: Request, res: Response) {
@@ -1781,9 +1786,13 @@ function filterAndSortTemplates(query: Request['query']) {
   const q = String(query.q || '').trim().toLowerCase()
   const sort = String(query.sort || 'popular').trim().toLowerCase()
 
-  const allApps = getRegistryApplications()
+  const registry = loadCentralRegistry()
+  const allApps = registry.applications
+  const categories = registry.categories || {}
   let list = allApps.filter((t) => {
-    if (category && t.category !== category) return false
+    const catDef = categories[t.category]
+    const catLabel = (catDef?.label || '').toLowerCase()
+    if (category && t.category !== category && !catLabel.includes(category)) return false
     if (compatibility && t.compatibility !== compatibility) return false
     if (difficulty && t.difficulty !== difficulty) return false
     if (runtime && !t.runtime.toLowerCase().includes(runtime)) return false
@@ -1796,6 +1805,7 @@ function filterAndSortTemplates(query: Request['query']) {
         t.id.toLowerCase().includes(q) ||
         t.description.toLowerCase().includes(q) ||
         t.category.toLowerCase().includes(q) ||
+        catLabel.includes(q) ||
         t.runtime.toLowerCase().includes(q) ||
         t.compatibility.toLowerCase().includes(q) ||
         t.tags.some((tag) => tag.toLowerCase().includes(q))

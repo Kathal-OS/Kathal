@@ -78,7 +78,7 @@ export default function Sidebar({ user, onLogout, mobileOpen = false, onClose })
         className={({ isActive }) =>
           `flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium whitespace-nowrap transition-colors duration-150 ${
             isActive
-              ? 'bg-kathal-600/15 text-kathal-400'
+              ? 'bg-kathal-600/20 text-yellow-300'
               : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'
           }`
         }
@@ -90,15 +90,18 @@ export default function Sidebar({ user, onLogout, mobileOpen = false, onClose })
   }
 
   const sidebarBody = (
-    <aside className="w-64 shrink-0 bg-[#0F1521] border-r border-slate-800/80 flex flex-col h-full">
+    <aside className="w-64 shrink-0 bg-[#0B120B] border-r border-slate-800/80 flex flex-col h-full">
       {/* Brand Header */}
       <div className="h-16 px-5 border-b border-slate-800/80 flex items-center justify-between shrink-0">
         <NavLink to="/" onClick={onClose} className="flex items-center gap-2.5 whitespace-nowrap shrink-0">
           <span className="w-8 h-8 rounded-lg bg-kathal-600 flex items-center justify-center shadow-sm">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="6" rx="1.5" fill="white" />
-              <rect x="3" y="13" width="10" height="7" rx="1.5" fill="white" fillOpacity="0.9" />
-              <rect x="16" y="13" width="5" height="7" rx="1.5" fill="white" fillOpacity="0.7" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2.5V5" stroke="#FACC15" strokeWidth="2" strokeLinecap="round" />
+              <path d="M12.4 4.2c2.2-1.4 5-.9 6 .7-2 1-4.5.8-6-.7z" fill="#86EFAC" />
+              <path d="M12 5c4.5 0 7 3.2 7 7.8 0 4.8-2.9 8.7-7 8.7s-7-3.9-7-8.7C5 8.2 7.5 5 12 5z" fill="#113F1B" stroke="#86EFAC" strokeWidth="1.4" />
+              <ellipse cx="10.2" cy="11.8" rx="1.6" ry="2.4" transform="rotate(-14 10.2 11.8)" fill="#FACC15" />
+              <ellipse cx="13.8" cy="12" rx="1.6" ry="2.4" transform="rotate(14 13.8 12)" fill="#FDE047" />
+              <ellipse cx="12" cy="16" rx="1.7" ry="2.2" fill="#EAB308" />
             </svg>
           </span>
           <span className="font-display text-lg font-bold tracking-tight text-slate-100">

@@ -16,17 +16,23 @@ import {
 } from 'lucide-react'
 import { useApi, apiFetch, apiPost } from '../hooks/useApi'
 import ContainerStatusWidget from '../components/ContainerStatusWidget'
-import HostMonitoringWidget from '../components/HostMonitoringWidget'
+import SystemMonitor from '../components/SystemMonitor'
 import QuickActionsWidget from '../components/QuickActionsWidget'
 
-function MetricCard({ icon: Icon, label, value, sub }) {
+function getMetricTone(percent) {
+  if (percent >= 85) return 'text-red-400'
+  if (percent >= 65) return 'text-yellow-400'
+  return 'text-green-400'
+}
+
+function MetricCard({ icon: Icon, label, value, sub, valueClass = 'text-slate-100' }) {
   return (
-    <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5">
+    <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-medium text-slate-400">{label}</span>
-        <Icon className="w-4 h-4 text-slate-500" strokeWidth={1.85} />
+        <Icon className="w-4 h-4 text-slate-400" strokeWidth={1.85} />
       </div>
-      <p className="text-2xl font-bold text-slate-100 tabular-nums">{value}</p>
+      <p className={`text-2xl font-bold tabular-nums ${valueClass}`}>{value}</p>
       {sub && <p className="text-xs text-slate-500 mt-1 tabular-nums">{sub}</p>}
     </div>
   )
@@ -159,7 +165,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
   return (
     <div className="p-6 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Welcome / Status Banner */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6 flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <span className="inline-flex items-center gap-1.5 font-medium text-green-400">
@@ -206,29 +212,33 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
           label="Processor (CPU)"
           value={`${sys?.cpu?.toFixed(1) || 0}%`}
           sub={`${sys?.cpuCores || 0} cores available`}
+          valueClass={getMetricTone(sys?.cpu || 0)}
         />
         <MetricCard
           icon={MemoryStick}
           label="Memory (RAM)"
           value={`${sys?.memory?.percent?.toFixed(1) || 0}%`}
           sub={`${formatBytes(sys?.memory?.used)} of ${formatBytes(sys?.memory?.total)}`}
+          valueClass={getMetricTone(sys?.memory?.percent || 0)}
         />
         <MetricCard
           icon={HardDrive}
           label="Storage (Disk)"
           value={`${sys?.disk?.percent?.toFixed(1) || 0}%`}
           sub={`${formatBytes(sys?.disk?.used)} of ${formatBytes(sys?.disk?.total)}`}
+          valueClass={getMetricTone(sys?.disk?.percent || 0)}
         />
         <MetricCard
           icon={ArrowUpDown}
           label="Network Traffic"
           value={formatBytes(sys?.network?.bytesSent)}
           sub={`Sent · ${formatBytes(sys?.network?.bytesRecv)} received`}
+          valueClass="text-yellow-400"
         />
       </div>
 
-      {/* Live Host CPU & Memory Monitoring Widget */}
-      <HostMonitoringWidget />
+      {/* Real-time System Monitor (CPU, Memory & Disk via Node.js os) */}
+      <SystemMonitor />
 
       {/* Real Running Local Apps Widget */}
       <ContainerStatusWidget refreshKey={refreshKey} />
@@ -237,7 +247,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
       <QuickActionsWidget onPruned={refreshDashboard} />
 
       {/* One-Click Popular Local Apps */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">One-Click Local Apps (Zero Docker)</h2>
@@ -322,7 +332,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
 
       {/* System Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
           <h2 className="text-base font-semibold text-slate-100 mb-4">Server Details</h2>
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-slate-800/60 pb-2">
@@ -346,7 +356,7 @@ export default function Dashboard({ externalRefreshKey = 0, onOpenQuickLaunch })
           </dl>
         </div>
 
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
           <h2 className="text-base font-semibold text-slate-100 mb-4">Local Runtime Summary</h2>
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between border-b border-slate-800/60 pb-2">

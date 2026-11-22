@@ -60,7 +60,7 @@ export default function ContainerStatusWidget({ refreshKey = 0 }) {
   const pct = (count) => (total > 0 ? Math.round((count / total) * 100) : 0)
 
   return (
-    <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+    <section className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <div className="flex items-center gap-2">

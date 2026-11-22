@@ -211,7 +211,7 @@ export function getRegistryAppById(id: string): ServiceTemplate | undefined {
   return loadCentralRegistry().applications.find((app) => app.id === id)
 }
 
-// Bootstrap /data/app-registry.json if missing on first import
-if (!fs.existsSync(APP_REGISTRY_PATH)) {
+// Bootstrap /data/registry.json if missing on first import
+if (!fs.existsSync(REGISTRY_PATH)) {
   ensureCentralRegistryFile()
 }

@@ -30,7 +30,7 @@ export default function TopBar({ onOpenMobileNav, onOpenQuickLaunch }) {
     (location.pathname.startsWith('/templates/') ? ROUTE_META['/templates'] : ROUTE_META['/'])
 
   return (
-    <header className="h-16 px-4 sm:px-8 border-b border-slate-800/80 bg-[#0D121C]/90 backdrop-blur-sm flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30">
+    <header className="h-16 px-4 sm:px-8 border-b border-slate-800/80 bg-[#0A100A]/90 backdrop-blur-sm flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30">
       <div className="flex items-center gap-3 min-w-0">
         <button
           type="button"

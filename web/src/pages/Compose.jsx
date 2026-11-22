@@ -286,21 +286,21 @@ export default function Compose() {
 
       {/* Summary Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl px-4 py-3.5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl px-4 py-3.5">
           <p className="text-xs font-medium text-slate-400">Discovered Stacks</p>
           <p className="text-2xl font-semibold text-slate-100 mt-1 tabular-nums">{summary.total}</p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl px-4 py-3.5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl px-4 py-3.5">
           <p className="text-xs font-medium text-slate-400">Healthy Stacks</p>
           <p className="text-2xl font-semibold text-green-400 mt-1 tabular-nums">{summary.healthy}</p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl px-4 py-3.5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl px-4 py-3.5">
           <p className="text-xs font-medium text-slate-400">Down / Degraded</p>
           <p className="text-2xl font-semibold text-red-400 mt-1 tabular-nums">
             {summary.down + summary.degraded}
           </p>
         </div>
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl px-4 py-3.5">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl px-4 py-3.5">
           <p className="text-xs font-medium text-slate-400">Parsed Services</p>
           <p className="text-2xl font-semibold text-kathal-400 mt-1 tabular-nums">{summary.totalServices}</p>
         </div>
@@ -308,7 +308,7 @@ export default function Compose() {
 
       {/* Filter & Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 rounded-lg p-1">
+        <div className="flex items-center gap-1 bg-[#101A10] border border-slate-800 rounded-lg p-1">
           {[
             { id: 'all', label: `All (${summary.total})` },
             { id: 'healthy', label: `Healthy (${summary.healthy})` },
@@ -333,7 +333,7 @@ export default function Compose() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search stacks, file paths, or services..."
-          className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-72"
+          className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-72"
         />
       </div>
 
@@ -355,11 +355,11 @@ export default function Compose() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
           Scanning and parsing Compose stacks...
         </div>
       ) : filteredProjects.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center">
           <h2 className="text-lg font-semibold text-slate-200 mb-1">
             {projects.length === 0 ? 'No Compose stacks found' : 'No stacks match your filter'}
           </h2>
@@ -370,7 +370,7 @@ export default function Compose() {
           </p>
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-800/50 border-b border-slate-800">
               <tr>
@@ -540,7 +540,7 @@ export default function Compose() {
           <form
             onSubmit={handleAdd}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-4"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-4"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -746,7 +746,7 @@ export default function Compose() {
           <form
             onSubmit={handleUpdate}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4"
           >
             <div>
               <h3 className="text-xl font-bold text-slate-100">Inspect &amp; Edit: {selectedProject.name}</h3>

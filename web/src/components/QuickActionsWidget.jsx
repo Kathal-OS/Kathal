@@ -65,7 +65,7 @@ export default function QuickActionsWidget({ onPruned }) {
   }
 
   return (
-    <section className="bg-[#111827] border border-slate-800/90 rounded-xl p-6">
+    <section className="bg-[#101A10] border border-slate-800/90 rounded-xl p-6">
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-slate-100">Quick Maintenance</h2>
         <p className="text-xs text-slate-400 mt-0.5">

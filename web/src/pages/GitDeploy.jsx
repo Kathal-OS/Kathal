@@ -177,11 +177,11 @@ export default function GitDeploy() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
           Loading repositories...
         </div>
       ) : repos.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center">
           <GitBranch className="w-10 h-10 text-slate-500 mx-auto mb-3" />
           <h2 className="text-xl font-semibold text-slate-100 mb-1">No Git repositories connected</h2>
           <p className="text-sm text-slate-400 mb-4">
@@ -200,7 +200,7 @@ export default function GitDeploy() {
           {repos.map((repo) => (
             <div
               key={repo.id}
-              className="bg-[#111827] border border-slate-800/90 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4"
+              className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4"
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-3">
@@ -290,7 +290,7 @@ export default function GitDeploy() {
           <form
             onSubmit={handleSave}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
           >
             <h3 className="text-xl font-bold text-slate-100">{editingId ? 'Edit Repository' : 'Add Git Repository'}</h3>
             <div>
@@ -371,7 +371,7 @@ export default function GitDeploy() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-2xl w-full"
           >
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -418,7 +418,7 @@ export default function GitDeploy() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-xl w-full max-h-[80vh] overflow-y-auto"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-xl w-full max-h-[80vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-slate-100">Deploy History — {history.name}</h3>

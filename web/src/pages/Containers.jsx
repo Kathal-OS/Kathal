@@ -387,7 +387,7 @@ export default function Containers() {
 
       {/* Search & Filter */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1 bg-[#111827] border border-slate-800 p-1 rounded-lg">
+        <div className="flex items-center gap-1 bg-[#101A10] border border-slate-800 p-1 rounded-lg">
           {['all', 'running', 'stopped'].map((st) => (
             <button
               key={st}
@@ -407,16 +407,16 @@ export default function Containers() {
           placeholder="Search apps by name or runtime..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-64"
+          className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none w-full sm:w-64"
         />
       </div>
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-500">
           Loading local apps...
         </div>
       ) : filteredContainers.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center">
           <Box className="w-10 h-10 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-semibold text-slate-100 mb-1">No Local Apps Running</h2>
           <p className="text-sm text-slate-400 mb-4">
@@ -431,7 +431,7 @@ export default function Containers() {
           </button>
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-800/50 border-b border-slate-800">
               <tr>
@@ -468,7 +468,7 @@ export default function Containers() {
           <form
             onSubmit={handleDeploy}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
           >
             <div>
               <h2 className="text-xl font-bold text-slate-100">Install &amp; Run Local App</h2>
@@ -632,7 +632,7 @@ export default function Containers() {
           <form
             onSubmit={handleSaveDomain}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4"
           >
             <div>
               <h2 className="text-lg font-bold text-slate-100">Connect Domain to {domainTarget.name}</h2>
@@ -679,7 +679,7 @@ export default function Containers() {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#111827] border border-slate-800 rounded-2xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col"
+            className="bg-[#101A10] border border-slate-800 rounded-2xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col"
           >
             <div className="flex items-center justify-between mb-4">
               <div>

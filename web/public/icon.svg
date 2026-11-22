@@ -1,6 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#CC482E"/>
-  <rect x="96" y="112" width="320" height="104" rx="26" fill="#FFFFFF"/>
-  <rect x="96" y="256" width="184" height="144" rx="26" fill="#FFFFFF" fill-opacity="0.92"/>
-  <rect x="312" y="256" width="104" height="144" rx="26" fill="#FFFFFF" fill-opacity="0.72"/>
+  <rect width="512" height="512" rx="112" fill="#1D7A2B"/>
+  <!-- Stem & leaf -->
+  <path d="M256 68c0 24 0 42 0 42" stroke="#FACC15" stroke-width="22" stroke-linecap="round"/>
+  <path d="M262 94c36-26 86-18 104 12-34 18-76 14-104-12z" fill="#86EFAC"/>
+  <!-- Outer spiky jackfruit body -->
+  <path d="M256 108c84 0 132 62 132 148 0 92-54 166-132 166s-132-74-132-166c0-86 48-148 132-148z" fill="#154D20" stroke="#86EFAC" stroke-width="18"/>
+  <!-- Golden ripe jackfruit pods inside -->
+  <ellipse cx="222" cy="238" rx="30" ry="44" transform="rotate(-14 222 238)" fill="#FACC15"/>
+  <ellipse cx="290" cy="242" rx="30" ry="44" transform="rotate(14 290 242)" fill="#FDE047"/>
+  <ellipse cx="256" cy="316" rx="32" ry="42" fill="#EAB308"/>
 </svg>

@@ -247,7 +247,7 @@ export default function Images() {
 
         <Link
           to="/registries"
-          className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#111827] hover:bg-slate-800 border border-slate-800 rounded-lg text-sm text-slate-200 whitespace-nowrap shrink-0 transition-colors"
+          className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#101A10] hover:bg-slate-800 border border-slate-800 rounded-lg text-sm text-slate-200 whitespace-nowrap shrink-0 transition-colors"
         >
           <KeyRound className="w-4 h-4 text-slate-400" />
           <span>Manage Registries</span>
@@ -255,7 +255,7 @@ export default function Images() {
       </div>
 
       {/* Zero-Code Friendly Download Card */}
-      <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-5 space-y-3">
+      <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-100">Download an App Image</h2>
@@ -320,7 +320,7 @@ export default function Images() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by name or tag (e.g. nginx, alpine)..."
-              className="w-full pl-9 pr-8 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
+              className="w-full pl-9 pr-8 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 placeholder:text-slate-500 focus:border-kathal-500 focus:outline-none"
             />
             {search && (
               <button
@@ -338,7 +338,7 @@ export default function Images() {
             aria-label="Filter by repository or tag"
             value={repoTagFilter}
             onChange={(e) => setRepoTagFilter(e.target.value)}
-            className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             <option value="all">All Repositories &amp; Tags ({stats.total})</option>
             {filterOptions.repos.length > 0 && (
@@ -365,7 +365,7 @@ export default function Images() {
             aria-label="Filter by usage status"
             value={usageFilter}
             onChange={(e) => setUsageFilter(e.target.value)}
-            className="px-3 py-2 bg-[#111827] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
+            className="px-3 py-2 bg-[#101A10] border border-slate-800 rounded-lg text-sm text-slate-200 focus:border-kathal-500 focus:outline-none"
           >
             <option value="all">All Statuses ({stats.total})</option>
             <option value="unused">Unused ({stats.unused})</option>
@@ -390,7 +390,7 @@ export default function Images() {
 
         <div className="flex items-center gap-2 shrink-0">
           {confirmPrune ? (
-            <div className="inline-flex items-center gap-1.5 bg-[#111827] border border-red-500/40 rounded-lg px-2 py-1">
+            <div className="inline-flex items-center gap-1.5 bg-[#101A10] border border-red-500/40 rounded-lg px-2 py-1">
               <button
                 onClick={handlePruneUnused}
                 disabled={busyAction === 'prune'}
@@ -411,7 +411,7 @@ export default function Images() {
             <button
               onClick={() => setConfirmPrune(true)}
               disabled={stats.unused === 0 || busyAction === 'prune'}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-500/15 hover:bg-red-600 disabled:bg-[#111827] disabled:text-slate-600 disabled:border disabled:border-slate-800 text-red-400 hover:text-white rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-500/15 hover:bg-red-600 disabled:bg-[#101A10] disabled:text-slate-600 disabled:border disabled:border-slate-800 text-red-400 hover:text-white rounded-lg text-sm font-medium whitespace-nowrap shrink-0 transition-colors"
             >
               <Trash2 className="w-4 h-4" />
               <span>Delete Unused Images ({stats.unused})</span>
@@ -451,11 +451,11 @@ export default function Images() {
       )}
 
       {loading ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center text-slate-400 text-sm">
           Loading downloaded images...
         </div>
       ) : filteredImages.length === 0 ? (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl p-12 text-center space-y-2">
           <Package className="w-10 h-10 text-slate-600 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-200">
             {images.length === 0 ? 'No App Images Downloaded' : 'No Images Match Filter'}
@@ -467,7 +467,7 @@ export default function Images() {
           </p>
         </div>
       ) : (
-        <div className="bg-[#111827] border border-slate-800/90 rounded-xl overflow-x-auto">
+        <div className="bg-[#101A10] border border-slate-800/90 rounded-xl overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-slate-900/70 border-b border-slate-800">
               <tr>
