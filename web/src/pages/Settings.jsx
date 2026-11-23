@@ -19,7 +19,7 @@ import {
   ExternalLink,
   ArrowUpCircle,
 } from 'lucide-react'
-import { useApi, apiFetch, apiPost, apiPut } from '../hooks/useApi'
+import { useApi, apiFetch, apiPost, apiPut, hasPermission } from '../hooks/useApi'
 import PWAInstallButton from '../components/PWAInstallButton'
 import { usePWAInstall } from '../hooks/usePWAInstall'
 
@@ -34,7 +34,10 @@ const QUICK_DEPLOY_CATALOG = [
   { id: 'uptime-kuma', name: 'Uptime Kuma', icon: ShieldCheck, desc: 'Uptime monitor', image: 'louislam/uptime-kuma:latest', port: 3001 },
 ]
 
-export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdateChecked }) {
+export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdateChecked, currentUser = null }) {
+  const canManageSettings = !currentUser || hasPermission(currentUser, 'settings.manage')
+  const canRevealSecrets = !currentUser || hasPermission(currentUser, 'secrets.reveal')
+  const canDeploy = !currentUser || hasPermission(currentUser, 'applications.deploy')
   const { data: status } = useApi('/status')
   const { isInstalled, platform } = usePWAInstall()
   const [settings, setSettings] = useState(null)
@@ -49,6 +52,7 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
   const [confirmReset, setConfirmReset] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [copiedSecret, setCopiedSecret] = useState(false)
+  const [revealedWebhookSecret, setRevealedWebhookSecret] = useState(null)
 
   useEffect(() => {
     if (initialUpdateInfo) setUpdateInfo(initialUpdateInfo)
@@ -100,10 +104,40 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
   const handleRegenerateSecret = async () => {
     try {
       const res = await apiPost('/settings/regenerate-webhook', {})
-      setSettings((prev) => ({ ...prev, webhookSecret: res.webhookSecret }))
+      setRevealedWebhookSecret(res.webhookSecret)
+      setSettings((prev) => ({ ...prev, hasWebhookSecret: true, webhookSecretMasked: '••••••••' }))
       setSaveBanner({ type: 'success', text: 'Webhook secret regenerated.' })
     } catch (err) {
       setSaveBanner({ type: 'error', text: err.message || 'Failed to regenerate secret.' })
+    }
+  }
+
+  const handleRevealWebhookSecret = async () => {
+    if (revealedWebhookSecret) {
+      setRevealedWebhookSecret(null)
+      return
+    }
+    try {
+      const res = await apiPost('/settings/reveal-webhook', {})
+      setRevealedWebhookSecret(res.webhookSecret || '')
+    } catch (err) {
+      setSaveBanner({ type: 'error', text: err.message || 'Failed to reveal webhook secret.' })
+    }
+  }
+
+  const handleCopyWebhookSecret = async () => {
+    try {
+      let secret = revealedWebhookSecret
+      if (!secret) {
+        const res = await apiPost('/settings/reveal-webhook', {})
+        secret = res.webhookSecret || ''
+        setRevealedWebhookSecret(secret)
+      }
+      await navigator.clipboard?.writeText(secret)
+      setCopiedSecret(true)
+      setTimeout(() => setCopiedSecret(false), 1500)
+    } catch (err) {
+      setSaveBanner({ type: 'error', text: err.message || 'Failed to copy webhook secret.' })
     }
   }
 
@@ -333,42 +367,53 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <code className="text-xs bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded font-mono text-slate-300 truncate flex-1">
-                    Secret: {settings.webhookSecret}
+                    Secret: {revealedWebhookSecret || settings.webhookSecretMasked || '••••••••'}
                   </code>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(settings.webhookSecret || '')
-                      setCopiedSecret(true)
-                      setTimeout(() => setCopiedSecret(false), 1500)
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-200 shrink-0"
-                  >
-                    {copiedSecret ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedSecret ? 'Copied' : 'Copy'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRegenerateSecret}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-200 shrink-0"
-                  >
-                    <RotateCw className="w-3 h-3" />
-                    <span>Rotate</span>
-                  </button>
+                  {canRevealSecrets && (
+                    <button
+                      type="button"
+                      onClick={handleRevealWebhookSecret}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-200 shrink-0"
+                    >
+                      <span>{revealedWebhookSecret ? 'Hide' : 'Reveal'}</span>
+                    </button>
+                  )}
+                  {canRevealSecrets && (
+                    <button
+                      type="button"
+                      onClick={handleCopyWebhookSecret}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-200 shrink-0"
+                    >
+                      {copiedSecret ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedSecret ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  )}
+                  {canManageSettings && (
+                    <button
+                      type="button"
+                      onClick={handleRegenerateSecret}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-200 shrink-0"
+                    >
+                      <RotateCw className="w-3 h-3" />
+                      <span>Rotate</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-6 py-2.5 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving Settings...' : 'Save Operational Settings'}
-            </button>
-          </div>
+          {canManageSettings && (
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={saving}
+                className="px-6 py-2.5 bg-kathal-600 hover:bg-kathal-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {saving ? 'Saving Settings...' : 'Save Operational Settings'}
+              </button>
+            </div>
+          )}
         </form>
       )}
 
@@ -525,29 +570,31 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {QUICK_DEPLOY_CATALOG.map((app) => {
-            const Icon = app.icon
-            const busy = deployingId === app.id
-            return (
-              <button
-                key={app.id}
-                type="button"
-                onClick={() => handleQuickDeploy(app)}
-                disabled={deployingId !== null}
-                className="p-3.5 rounded-xl border text-left transition-colors bg-slate-900/70 hover:bg-slate-800 border-slate-800 hover:border-kathal-500/50 group disabled:opacity-50"
-              >
-                <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 group-hover:text-kathal-400 mb-2.5 transition-colors">
-                  <Icon className="w-4 h-4" />
-                </div>
-                <p className="text-sm font-medium text-slate-100 group-hover:text-kathal-400">
-                  {busy ? 'Deploying...' : app.name}
-                </p>
-                <p className="text-xs text-slate-400 mt-0.5">{app.desc}</p>
-              </button>
-            )
-          })}
-        </div>
+        {canDeploy && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {QUICK_DEPLOY_CATALOG.map((app) => {
+              const Icon = app.icon
+              const busy = deployingId === app.id
+              return (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => handleQuickDeploy(app)}
+                  disabled={deployingId !== null}
+                  className="p-3.5 rounded-xl border text-left transition-colors bg-slate-900/70 hover:bg-slate-800 border-slate-800 hover:border-kathal-500/50 group disabled:opacity-50"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 group-hover:text-kathal-400 mb-2.5 transition-colors">
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-100 group-hover:text-kathal-400">
+                    {busy ? 'Deploying...' : app.name}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">{app.desc}</p>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Install on any OS (100% self-hosted, zero cloud) */}
@@ -589,41 +636,43 @@ export default function Settings({ updateInfo: initialUpdateInfo = null, onUpdat
       </div>
 
       {/* Danger Zone */}
-      <div className="bg-[#101A10] border border-red-500/30 rounded-xl p-6">
-        <div className="flex items-center gap-2 mb-3 text-red-400">
-          <AlertTriangle className="w-4 h-4" />
-          <h2 className="text-lg font-semibold">Danger Zone</h2>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="font-medium text-slate-100">Reset Dashboard</p>
-            <p className="text-sm text-slate-400">Restore default apps, routes, and operational settings.</p>
+      {canManageSettings && (
+        <div className="bg-[#101A10] border border-red-500/30 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-3 text-red-400">
+            <AlertTriangle className="w-4 h-4" />
+            <h2 className="text-lg font-semibold">Danger Zone</h2>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleResetDashboard}
-              disabled={resetting}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-                confirmReset
-                  ? 'bg-red-600 hover:bg-red-500 text-white'
-                  : 'bg-red-500/15 hover:bg-red-600 text-red-400 hover:text-white'
-              }`}
-            >
-              {resetting ? 'Resetting...' : confirmReset ? 'Confirm Reset Everything' : 'Reset'}
-            </button>
-            {confirmReset && !resetting && (
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="font-medium text-slate-100">Reset Dashboard</p>
+              <p className="text-sm text-slate-400">Restore default apps, routes, and operational settings.</p>
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmReset(false)}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm"
+                onClick={handleResetDashboard}
+                disabled={resetting}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                  confirmReset
+                    ? 'bg-red-600 hover:bg-red-500 text-white'
+                    : 'bg-red-500/15 hover:bg-red-600 text-red-400 hover:text-white'
+                }`}
               >
-                Cancel
+                {resetting ? 'Resetting...' : confirmReset ? 'Confirm Reset Everything' : 'Reset'}
               </button>
-            )}
+              {confirmReset && !resetting && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(false)}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

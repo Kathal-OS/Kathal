@@ -1,17 +1,17 @@
-version: "3.8"
-
 services:
   kathal:
     build: .
     container_name: kathal
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "3000:3000"
     volumes:
       - kathal-data:/data
     environment:
-      - KATHAL_HTTP_ADDR=:8080
-      - KATHAL_DB_PATH=/data/kathal.db
+      - NODE_ENV=production
+      - PORT=3000
+      - KATHAL_DATA_DIR=/data
+      - KATHAL_APPS_DIR=/data/apps
 
 volumes:
   kathal-data:

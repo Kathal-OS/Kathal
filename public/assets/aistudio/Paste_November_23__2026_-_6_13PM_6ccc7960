@@ -1,0 +1,1328 @@
+# KATHAL OS — PHASE 2
+# ULTIMATE DEPLOYMENT ENGINE, INFRASTRUCTURE OPERATIONS & PRODUCTION IMPLEMENTATION
+
+You are acting as a principal software architect, senior DevOps engineer, platform engineer, security engineer, database engineer, QA engineer, and product designer.
+
+Your mission is to implement **Phase 2 of KATHAL OS**: transform the existing codebase into a reliable, production-oriented application deployment and infrastructure management platform.
+
+This is an implementation task, not a proposal-writing exercise.
+
+You must inspect the existing repository, understand its architecture, implement the required functionality, run tests, fix problems, update documentation, and provide a truthful completion report.
+
+Do not stop after producing an implementation plan.
+
+---
+
+# 1. PROJECT IDENTITY
+
+**Product:** KATHAL OS
+
+**Vision:** A unified, local-first, AI-native infrastructure operating system for managing applications, deployments, containers, databases, domains, servers, automation, and cloud infrastructure.
+
+**Official organization:** https://github.com/Kathal-OS
+
+**Main repository:** https://github.com/Kathal-OS/Kathal
+
+Related repositories:
+
+- https://github.com/Kathal-OS/kathal-plugins-sdk
+- https://github.com/Kathal-OS/kathal-plugins
+- https://github.com/Kathal-OS/kathal-examples
+- https://github.com/Kathal-OS/kathal-docs
+- https://github.com/Kathal-OS/kathal-ci
+- https://github.com/Kathal-OS/Kathal-CLI
+- https://github.com/Kathal-OS/OLL-Market
+
+Reference projects:
+
+- https://github.com/coollabsio/coolify
+- https://github.com/dokploy/dokploy
+- https://github.com/dokku/dokku
+- https://github.com/caprover/caprover
+- https://github.com/libracoder/kiri
+- https://github.com/moby/moby
+- https://github.com/docker/compose
+- https://github.com/moby/buildkit
+- https://github.com/traefik/traefik
+- https://github.com/caddyserver/caddy
+- https://github.com/portainer/portainer
+
+Use these projects as architectural and product references. Do not copy their code or branding. Prefer mature, established infrastructure technologies over reinventing them.
+
+---
+
+# 2. CURRENT PROJECT BASELINE
+
+The previous implementation reports indicate that Phase 0, Phase 1, and Phase 1.5 have been completed.
+
+Treat the existing repository as the source of truth. Verify every assumption before changing code.
+
+Reported capabilities include:
+
+## Backend
+- Node.js 22 and TypeScript.
+- Existing HTTP API and WebSocket functionality.
+- SQLite persistence using Node.js built-in `node:sqlite`.
+- Database migrations and JSON-to-SQLite migration.
+- Authentication and revocable sessions.
+- Five roles: Owner, Administrator, Operator, Developer, Viewer.
+- Granular backend-enforced RBAC.
+- Audit logging with filtering and pagination.
+- Encrypted Vault using AES-256-GCM.
+- Vault key rotation and recovery behavior.
+- Fleet server registration and heartbeat functionality.
+- WebSocket terminal security hardening.
+
+## Frontend
+- React and Vite.
+- Dashboard and existing infrastructure views.
+- Light and dark themes.
+- Authentication and session restoration.
+- RBAC-gated navigation and actions.
+- Users and Roles.
+- Security and Vault.
+- Audit Logs.
+- Fleet management.
+
+## Reported tests
+- 23 tests passing across 8 suites.
+- Vite production build successful.
+- TypeScript compilation successful.
+
+These are reported baseline results, not permission to assume everything is currently working. Re-run the relevant checks.
+
+## Known outstanding limitations
+1. `server.ts` remains approximately 3,551 lines.
+2. Several application-store, installer, service-engine, proxy, Git, Compose, file-manager, and backup routes remain in that file.
+3. Frontend and root dependency versions may be inconsistent.
+4. Managed database credentials may exist in SQLite, but database daemons are not yet provisioned.
+5. Fleet supports reachability and heartbeats, but remote application execution is not yet implemented.
+
+Phase 2 must address the deployment and infrastructure portions without prematurely claiming completion of Phase 3.
+
+---
+
+# 3. NON-NEGOTIABLE ENGINEERING RULES
+
+1. Inspect before modifying.
+2. Preserve existing working functionality.
+3. Do not perform an unnecessary full rewrite.
+4. Do not remove existing APIs without compatibility or migration planning.
+5. Do not replace working security controls with weaker alternatives.
+6. Do not introduce hardcoded credentials, tokens, or encryption keys.
+7. Do not expose secrets in logs, responses, terminal output, or frontend state.
+8. Validate all user-controlled input on the backend.
+9. Enforce RBAC on the backend, not only in the UI.
+10. Use transactions for multi-step persistent operations.
+11. Make long-running operations asynchronous and observable.
+12. Implement reliable cleanup and cancellation.
+13. Avoid duplicate deployment execution.
+14. Never report an operation as successful until its actual result has been verified.
+15. Do not fabricate successful tests, deployments, integrations, or infrastructure.
+16. Use existing dependencies where appropriate; add dependencies only when justified.
+17. Prefer modular architecture and clear interfaces.
+18. Maintain Windows, Linux, and macOS compatibility where the existing product supports them.
+19. Never expose arbitrary host command execution through an unauthenticated endpoint.
+20. Never execute arbitrary user-supplied shell commands without strict authorization and isolation.
+
+When a feature requires unavailable infrastructure, implement a clear adapter boundary, validation, error handling, and an honest unavailable status. Do not simulate a successful real deployment.
+
+---
+
+# 4. PHASE 2 OBJECTIVES
+
+Implement the following major systems:
+
+1. Backend modularization.
+2. Dependency and build consistency.
+3. Git-based application deployment.
+4. Docker and Docker Compose lifecycle management.
+5. Deployment jobs and background task execution.
+6. Deployment history and rollback.
+7. Application health checks and recovery.
+8. Domain and reverse proxy management.
+9. HTTPS and ACME certificate lifecycle.
+10. Real managed database provisioning.
+11. Application environment and configuration management.
+12. Deployment observability and audit integration.
+13. Improved frontend deployment experience.
+14. Comprehensive tests and documentation.
+
+---
+
+# 5. BACKEND MODULARIZATION
+
+The existing backend must become easier to maintain and extend.
+
+Inspect `server.ts`, identify route groups, shared middleware, runtime services, and dependencies.
+
+Extract functionality into organized modules.
+
+Suggested structure:
+
+```text
+src/
+  app.ts
+  server.ts
+
+  config/
+  database/
+  repositories/
+
+  auth/
+  security/
+  middleware/
+  audit/
+
+  fleet/
+  websocket/
+
+  routes/
+    health.routes.ts
+    auth.routes.ts
+    users.routes.ts
+    roles.routes.ts
+    audit.routes.ts
+    fleet.routes.ts
+    apps.routes.ts
+    deployments.routes.ts
+    git.routes.ts
+    containers.routes.ts
+    compose.routes.ts
+    domains.routes.ts
+    certificates.routes.ts
+    databases.routes.ts
+    environment.routes.ts
+    settings.routes.ts
+
+  services/
+    app.service.ts
+    deployment.service.ts
+    git.service.ts
+    container.service.ts
+    compose.service.ts
+    proxy.service.ts
+    certificate.service.ts
+    database-provisioner.service.ts
+    health-check.service.ts
+
+  adapters/
+    runtime/
+    git/
+    containers/
+    proxy/
+    certificates/
+    databases/
+
+  jobs/
+    job-runner.ts
+    deployment-queue.ts
+    job-repository.ts
+
+  validation/
+  utils/
+  types/
+```
+
+This is a target structure, not a requirement to blindly create every file.
+
+Requirements:
+
+- Separate application initialization from server startup.
+- Extract route registration.
+- Extract business logic from route handlers.
+- Introduce service and adapter interfaces.
+- Keep database access out of route handlers where practical.
+- Centralize error handling.
+- Centralize configuration.
+- Preserve current API behavior.
+- Add compatibility tests for existing endpoints.
+- Avoid circular imports.
+- Avoid giant generic service files.
+
+Do not modularize merely by moving code without improving responsibility boundaries.
+
+---
+
+# 6. DEPENDENCY AND BUILD CONSISTENCY
+
+Audit all package manifests and lockfiles.
+
+Pay particular attention to:
+
+- Root `package.json`.
+- `web/package.json`.
+- Node.js engine requirements.
+- TypeScript.
+- Vite.
+- React.
+- React Router.
+- Testing libraries.
+- Docker-related dependencies.
+
+Requirements:
+
+1. Establish a supported Node.js 22 baseline.
+2. Resolve incompatible or duplicated dependency versions.
+3. Align frontend and backend dependencies where appropriate.
+4. Preserve Electron compatibility.
+5. Keep lockfiles synchronized.
+6. Remove unused dependencies only after checking actual imports.
+7. Check known vulnerabilities.
+8. Ensure clean installation works.
+9. Ensure development and production builds work.
+10. Document the supported runtime and build process.
+
+Do not blindly upgrade every dependency to its latest version.
+
+---
+
+# 7. APPLICATION MANAGEMENT AND GIT DEPLOYMENTS
+
+Build a genuine Git-based deployment system.
+
+## Supported sources
+
+Initially support:
+
+- GitHub repositories.
+- GitLab repositories.
+- Generic Git URLs.
+
+The design must allow additional Git providers later.
+
+## Application lifecycle
+
+Implement:
+
+- Create application.
+- Edit application.
+- Delete application.
+- Archive application.
+- Assign application to a server.
+- Configure source repository.
+- Configure branch.
+- Configure build settings.
+- Configure deployment directory.
+- Configure application port.
+- Configure health checks.
+- Configure environment variables.
+- Trigger deployment.
+- Cancel deployment.
+- View deployment status.
+- View deployment history.
+- Redeploy a previous revision.
+
+## Git operations
+
+Implement secure Git integration:
+
+- Clone repository.
+- Fetch updates.
+- Checkout branch.
+- Resolve commit SHA.
+- Pull or update source.
+- Support private repository authentication.
+- Support deploy keys or securely managed access tokens.
+- Support webhook-triggered deployments.
+- Validate webhook signatures.
+- Prevent replay attacks where practical.
+- Avoid storing credentials in plaintext.
+
+Use the Vault for sensitive Git credentials.
+
+Never put credentials into clone URLs that might be persisted or logged.
+
+## Build configuration
+
+Support:
+
+- Dockerfile builds.
+- Docker Compose builds.
+- BuildKit where available.
+- Configurable build context.
+- Configurable Dockerfile path.
+- Build arguments with appropriate secret handling.
+- Configurable application start command only within the supported execution model.
+- Build logs.
+- Build timeout.
+- Build cancellation.
+
+Use a secure build adapter.
+
+Do not run arbitrary builds on the control plane without appropriate isolation and authorization.
+
+---
+
+# 8. DOCKER AND DOCKER COMPOSE ENGINE
+
+Implement actual Docker lifecycle management using the Docker Engine API or a well-maintained compatible library.
+
+Support Docker Engine availability detection.
+
+## Docker functionality
+
+- List containers.
+- Inspect containers.
+- Create containers.
+- Start containers.
+- Stop containers.
+- Restart containers.
+- Remove containers.
+- View container logs.
+- Stream logs.
+- Inspect resource usage.
+- View container health.
+- List images.
+- Pull images.
+- Remove unused images.
+- List networks.
+- Create networks.
+- Remove networks.
+- List volumes.
+- Inspect volumes.
+
+## Compose functionality
+
+Support:
+
+- Compose project creation.
+- Compose file validation.
+- Compose configuration inspection.
+- Compose deployment.
+- Compose update.
+- Compose stop.
+- Compose restart.
+- Compose down.
+- Compose logs.
+- Compose service status.
+- Compose project listing.
+
+Use the installed Compose implementation through a controlled adapter.
+
+Requirements:
+
+- Never execute commands through unsafe string concatenation.
+- Use argument arrays or structured APIs.
+- Validate project names and filesystem paths.
+- Prevent path traversal.
+- Restrict access to protected host paths.
+- Enforce resource and authorization limits.
+- Capture process exit status.
+- Support timeouts and cancellation.
+- Persist operation history.
+- Provide actionable error messages.
+
+If Docker is unavailable, show a clear disconnected state and explain how to configure it.
+
+Do not display fake container data.
+
+---
+
+# 9. DEPLOYMENT JOB ENGINE
+
+Introduce a reliable background job system.
+
+Deployment operations must not depend on keeping an HTTP request open.
+
+## Job lifecycle
+
+Use explicit states:
+
+- queued
+- validating
+- preparing
+- cloning
+- building
+- deploying
+- starting
+- health_check
+- succeeded
+- failed
+- cancelling
+- cancelled
+- rolling_back
+
+Implement:
+
+- Persistent job records.
+- Unique job IDs.
+- Job deduplication.
+- Queue processing.
+- Retry policy.
+- Retry limits.
+- Timeouts.
+- Cancellation.
+- Worker recovery.
+- Startup reconciliation.
+- Structured progress events.
+- Deployment logs.
+- Audit events.
+
+The job engine must recover sensibly after process restart.
+
+Prevent multiple workers from processing the same job concurrently.
+
+Use SQLite transactions and appropriate locking or leases.
+
+Do not mark interrupted jobs as successful.
+
+Expose progress through authenticated API endpoints and WebSocket or Server-Sent Events where appropriate.
+
+Ensure the frontend can reconnect and retrieve current job state.
+
+---
+
+# 10. DEPLOYMENT HISTORY AND ROLLBACK
+
+Every deployment must produce a durable record.
+
+Store:
+
+- Deployment ID.
+- Application ID.
+- Server ID.
+- Source repository.
+- Branch.
+- Commit SHA.
+- Build configuration version.
+- Image reference.
+- Image digest where available.
+- Start and completion timestamps.
+- Trigger type.
+- Triggering user.
+- Status.
+- Logs reference.
+- Health-check result.
+- Error details.
+- Rollback relationship.
+
+Implement:
+
+- Deployment history.
+- Deployment detail.
+- Log viewing.
+- Deployment comparison.
+- Previous deployment selection.
+- Rollback.
+- Redeploy.
+
+Rollback must use an immutable previously built image or a reproducible source revision.
+
+Do not describe rebuilding an older commit as an instant rollback.
+
+Implement a safe rollback strategy that preserves the current deployment record and creates a new rollback event.
+
+Where possible, use a staged deployment:
+
+1. Build image.
+2. Prepare new runtime.
+3. Start new version.
+4. Run health checks.
+5. Switch traffic.
+6. Confirm deployment.
+7. Retain previous version for rollback.
+
+If a step fails, restore the previous healthy version when possible.
+
+---
+
+# 11. APPLICATION HEALTH CHECKS AND RECOVERY
+
+Create a reusable health-check system.
+
+Support:
+
+- HTTP health checks.
+- TCP checks.
+- Container health status.
+- Configurable intervals.
+- Configurable timeouts.
+- Failure thresholds.
+- Recovery thresholds.
+- Last successful check.
+- Last failure.
+- Health history.
+
+Provide clear application states:
+
+- healthy
+- degraded
+- unhealthy
+- starting
+- stopped
+- unknown
+
+Implement controlled recovery policies:
+
+- Restart application.
+- Restart container.
+- Mark unhealthy.
+- Trigger notification.
+- Disable repeated recovery after a configured limit.
+
+Do not create infinite restart loops.
+
+Health-check execution must be resource-limited and cancellable.
+
+Keep health checks separate from the existing Fleet reachability checks.
+
+---
+
+# 12. DOMAIN AND REVERSE PROXY MANAGEMENT
+
+Create a proxy adapter architecture.
+
+Support a practical first implementation using an established proxy such as Traefik or Caddy, depending on the existing project architecture and platform compatibility.
+
+Do not build a custom reverse proxy.
+
+## Domain management
+
+Implement:
+
+- Add domain.
+- Remove domain.
+- Associate domain with an application.
+- Configure target port.
+- Configure HTTP routing.
+- Configure HTTPS routing.
+- Configure redirects.
+- Domain validation.
+- DNS guidance.
+- Domain status.
+- Proxy configuration status.
+
+## Proxy operations
+
+- Generate validated configuration.
+- Apply configuration safely.
+- Validate configuration before reload.
+- Reload proxy.
+- Retrieve proxy status.
+- Retrieve proxy logs where supported.
+- Detect conflicting host rules.
+- Recover from invalid configuration.
+
+Never expose a management interface publicly without authentication.
+
+Do not overwrite unrelated existing proxy configuration.
+
+Clearly document port conflicts and existing host proxy compatibility.
+
+---
+
+# 13. HTTPS AND ACME CERTIFICATE MANAGEMENT
+
+Implement certificate lifecycle management through a mature ACME-capable integration.
+
+Support:
+
+- Let's Encrypt.
+- HTTP-01 validation where supported.
+- DNS-01 as an extensible provider adapter.
+- Certificate issuance.
+- Certificate renewal.
+- Certificate expiration monitoring.
+- Certificate status.
+- Certificate deletion.
+- Renewal logs.
+- Failed renewal alerts.
+
+Requirements:
+
+- Store private keys securely.
+- Keep certificate material out of logs and API responses.
+- Never silently ignore renewal failures.
+- Validate domain ownership through the ACME challenge.
+- Avoid requesting certificates for domains that cannot be validated.
+- Support staging/test mode.
+- Provide clear DNS and firewall troubleshooting information.
+
+Do not claim HTTPS is active until the certificate and proxy configuration are actually verified.
+
+---
+
+# 14. REAL DATABASE PROVISIONING
+
+This is a major Phase 2 objective.
+
+The existing platform may store database configuration without actually provisioning database servers.
+
+Implement genuine database provisioning through adapter-based integrations.
+
+Initial targets:
+
+- PostgreSQL.
+- MySQL or MariaDB.
+- Redis where appropriate.
+
+Use official database images and established tooling.
+
+## Database lifecycle
+
+- Create database instance.
+- Configure version.
+- Configure storage.
+- Configure network.
+- Generate credentials.
+- Create database.
+- Create database user.
+- Configure permissions.
+- Start database service.
+- Stop database service.
+- Restart database service.
+- Delete database instance.
+- View health.
+- View logs.
+- Rotate credentials.
+- View connection information.
+
+## Security
+
+- Generate strong random credentials.
+- Store secrets in Vault.
+- Mask passwords in all responses.
+- Restrict database exposure.
+- Default to internal networking.
+- Support explicit external exposure only with authorization.
+- Validate ports and configuration.
+- Prevent accidental deletion.
+- Audit privileged operations.
+
+## Provisioning verification
+
+A database must not be marked ready merely because its container was created.
+
+Verify:
+
+1. Runtime is running.
+2. Database process is healthy.
+3. Database accepts connections.
+4. Database credentials work.
+5. Requested database and user exist.
+
+Support persistence volumes and safe configuration changes.
+
+Clearly separate database management metadata from the actual database runtime.
+
+---
+
+# 15. ENVIRONMENT AND CONFIGURATION MANAGEMENT
+
+Implement secure application environment management.
+
+Support:
+
+- Add variable.
+- Update variable.
+- Delete variable.
+- Mask secret values.
+- Mark variables as sensitive.
+- Group variables by environment.
+- Development/staging/production environments.
+- Import and export non-secret configuration.
+- Deployment-specific configuration snapshots.
+
+Use Vault for secrets.
+
+Requirements:
+
+- Never expose sensitive values in ordinary list APIs.
+- Require explicit permission for secret reveal.
+- Audit reveal operations.
+- Never include secret values in deployment logs.
+- Avoid leaking secrets into frontend error messages.
+- Preserve deployment configuration history safely.
+
+Implement validation and variable-name restrictions.
+
+---
+
+# 16. API DESIGN
+
+Use consistent REST API conventions under the existing API prefix.
+
+Suggested endpoints:
+
+```text
+/api/v1/apps
+/api/v1/apps/:id
+
+/api/v1/apps/:id/deployments
+/api/v1/deployments
+/api/v1/deployments/:id
+/api/v1/deployments/:id/logs
+/api/v1/deployments/:id/cancel
+/api/v1/deployments/:id/rollback
+
+/api/v1/git/providers
+/api/v1/git/repositories
+/api/v1/git/webhooks
+
+/api/v1/containers
+/api/v1/containers/:id
+/api/v1/containers/:id/logs
+/api/v1/containers/:id/actions
+
+/api/v1/compose/projects
+/api/v1/compose/projects/:id
+
+/api/v1/domains
+/api/v1/domains/:id
+
+/api/v1/certificates
+/api/v1/certificates/:id
+
+/api/v1/databases
+/api/v1/databases/:id
+/api/v1/databases/:id/credentials
+
+/api/v1/environments
+/api/v1/apps/:id/environments
+
+/api/v1/jobs
+/api/v1/jobs/:id
+```
+
+These are suggested routes. Follow existing naming conventions where appropriate.
+
+Every endpoint must include:
+
+- Authentication.
+- RBAC permission enforcement.
+- Input validation.
+- Consistent error responses.
+- Appropriate status codes.
+- Audit logging for sensitive operations.
+- Pagination for list endpoints where appropriate.
+
+Generate or update API documentation.
+
+---
+
+# 17. RBAC PERMISSIONS
+
+Use the existing RBAC framework.
+
+Add or map granular permissions for:
+
+- apps.read
+- apps.create
+- apps.update
+- apps.delete
+- deployments.read
+- deployments.create
+- deployments.cancel
+- deployments.rollback
+- containers.read
+- containers.manage
+- compose.read
+- compose.manage
+- domains.read
+- domains.manage
+- certificates.read
+- certificates.manage
+- databases.read
+- databases.create
+- databases.manage
+- databases.delete
+- environments.read
+- environments.manage
+- jobs.read
+- jobs.manage
+
+Ensure existing role assignments remain compatible.
+
+Do not silently grant new administrative permissions to existing users.
+
+Create explicit migration and default-role policy.
+
+Test permission boundaries for every sensitive endpoint.
+
+---
+
+# 18. FRONTEND IMPLEMENTATION
+
+Build a polished, consistent, production-quality interface.
+
+Preserve existing KATHAL OS design language, navigation, theme system, and responsive behavior.
+
+Do not redesign unrelated parts of the application.
+
+Add or improve these sections:
+
+## Applications
+- Application list.
+- Application creation wizard.
+- Application details.
+- Git source configuration.
+- Build configuration.
+- Environment settings.
+- Domain assignment.
+- Health status.
+- Deployment actions.
+
+## Deployments
+- Deployment history.
+- Deployment detail.
+- Real-time progress.
+- Live logs.
+- Status timeline.
+- Commit information.
+- Retry.
+- Cancel.
+- Rollback.
+
+## Containers
+- Container list.
+- Container detail.
+- Status.
+- Resource usage.
+- Logs.
+- Lifecycle controls.
+- Images.
+- Networks.
+- Volumes.
+
+## Compose
+- Compose projects.
+- Project details.
+- Service status.
+- Compose configuration.
+- Logs.
+- Lifecycle controls.
+
+## Domains
+- Domain list.
+- Domain assignment.
+- DNS instructions.
+- Routing status.
+- HTTPS status.
+
+## Certificates
+- Certificate list.
+- Expiry information.
+- Renewal status.
+- Certificate actions.
+
+## Databases
+- Database instances.
+- Provisioning wizard.
+- Engine and version selection.
+- Credentials display with masking.
+- Connection details.
+- Health status.
+- Logs.
+- Lifecycle actions.
+
+## Jobs
+- Queue overview.
+- Job status.
+- Job detail.
+- Failure reasons.
+- Retry/cancel actions.
+
+## UX requirements
+
+- Proper loading states.
+- Empty states.
+- Error states.
+- Confirmation dialogs.
+- Destructive action protection.
+- Toast notifications.
+- Responsive layouts.
+- Accessible forms.
+- Search and filters.
+- Pagination.
+- No fake progress.
+- No fabricated metrics.
+- No fake operational data.
+
+The interface must reflect actual backend state.
+
+If an integration is unavailable, show a clear setup or unavailable state rather than mock success.
+
+---
+
+# 19. SQLITE SCHEMA AND MIGRATIONS
+
+Inspect the existing database schema before changing it.
+
+Create versioned migrations for all Phase 2 tables and columns.
+
+Potential entities:
+
+- applications
+- application_sources
+- application_environments
+- deployments
+- deployment_logs
+- deployment_artifacts
+- deployment_events
+- background_jobs
+- job_attempts
+- containers
+- compose_projects
+- domains
+- certificates
+- database_instances
+- database_credentials_metadata
+- health_checks
+- health_check_results
+- runtime_events
+
+Avoid duplicating entities that already exist.
+
+Requirements:
+
+- Foreign keys.
+- Appropriate indexes.
+- Unique constraints.
+- Timestamps.
+- Referential integrity.
+- Safe migrations.
+- Transactional schema changes.
+- Migration rollback strategy where feasible.
+- Backup before destructive migrations.
+
+Never store plaintext credentials in ordinary application tables.
+
+Use Vault references or encrypted secret storage.
+
+---
+
+# 20. OBSERVABILITY AND AUDIT
+
+Integrate all deployment and infrastructure actions with the existing audit system.
+
+Record:
+
+- User.
+- Action.
+- Resource.
+- Timestamp.
+- Outcome.
+- Request ID.
+- Source IP where available.
+- Relevant non-sensitive metadata.
+
+Never log secrets.
+
+Provide operational visibility for:
+
+- Deployment duration.
+- Build duration.
+- Job queue depth.
+- Failed jobs.
+- Application health.
+- Container health.
+- Database health.
+- Certificate expiration.
+- Proxy status.
+
+Metrics must come from actual runtime observations.
+
+Do not invent resource usage or performance statistics.
+
+---
+
+# 21. TESTING REQUIREMENTS
+
+Testing is mandatory.
+
+Preserve existing tests and expand them.
+
+## Unit tests
+
+Test:
+
+- Deployment state transitions.
+- Git provider adapters.
+- Input validation.
+- Job deduplication.
+- Retry logic.
+- Cancellation.
+- Rollback planning.
+- Health-check thresholds.
+- Domain validation.
+- Certificate state.
+- Database provisioning logic.
+- Vault secret references.
+
+## Integration tests
+
+Test:
+
+- SQLite migrations.
+- Application CRUD.
+- Git credential handling.
+- Deployment job persistence.
+- API authorization.
+- Container adapter behavior.
+- Compose adapter behavior.
+- Database provisioning with a controlled test runtime.
+- Audit event creation.
+- WebSocket progress updates.
+
+## Security tests
+
+Test:
+
+- Unauthorized access.
+- Permission escalation.
+- Cross-user resource access.
+- Secret leakage.
+- Command injection.
+- Path traversal.
+- SSRF protection.
+- Webhook signature validation.
+- Replay protection.
+- Unsafe proxy configuration.
+- Unauthorized database exposure.
+
+Use mocks for external infrastructure only where appropriate.
+
+Clearly label mocked tests.
+
+Do not claim a real Docker, database, or ACME integration was tested unless it actually was.
+
+## Regression tests
+
+Verify existing features still work:
+
+- Authentication.
+- Session revocation.
+- RBAC.
+- Vault.
+- Audit logs.
+- Fleet.
+- WebSocket terminal.
+- Existing dashboard.
+- Existing app functionality.
+
+---
+
+# 22. DOCUMENTATION
+
+Create or update:
+
+```text
+docs/
+  PHASE_2_ARCHITECTURE.md
+  PHASE_2_IMPLEMENTATION.md
+  DEPLOYMENT_ENGINE.md
+  GIT_DEPLOYMENTS.md
+  DOCKER_ENGINE.md
+  DOCKER_COMPOSE.md
+  JOB_ENGINE.md
+  ROLLBACK.md
+  DOMAIN_AND_PROXY.md
+  HTTPS_AND_CERTIFICATES.md
+  DATABASE_PROVISIONING.md
+  ENVIRONMENT_MANAGEMENT.md
+  API_REFERENCE.md
+  SECURITY_MODEL.md
+  OPERATIONS_RUNBOOK.md
+  TROUBLESHOOTING.md
+```
+
+Documentation must describe actual implemented behavior.
+
+Include:
+
+- Architecture diagrams where useful.
+- Setup requirements.
+- Configuration.
+- API examples.
+- Security considerations.
+- Operational procedures.
+- Failure recovery.
+- Known limitations.
+- Testing instructions.
+
+Update the main README and relevant developer documentation.
+
+---
+
+# 23. IMPLEMENTATION ORDER
+
+Work in controlled subphases.
+
+## Phase 2A — Foundation
+- Inspect repository.
+- Run baseline tests.
+- Resolve dependency inconsistencies.
+- Modularize backend.
+- Establish service and adapter interfaces.
+- Add database migrations.
+- Preserve existing functionality.
+
+## Phase 2B — Deployment Engine
+- Application model.
+- Git adapters.
+- Build adapter.
+- Job queue.
+- Deployment lifecycle.
+- Logs and events.
+- Deployment history.
+- Rollback.
+
+## Phase 2C — Runtime Operations
+- Docker adapter.
+- Container management.
+- Compose management.
+- Runtime inspection.
+- Resource and health information.
+
+## Phase 2D — Networking and HTTPS
+- Domain management.
+- Reverse proxy adapter.
+- Proxy configuration validation.
+- ACME integration.
+- Certificate renewal and monitoring.
+
+## Phase 2E — Database Provisioning
+- PostgreSQL provisioning.
+- MySQL/MariaDB provisioning.
+- Redis provisioning where appropriate.
+- Vault-backed credentials.
+- Health verification.
+- Lifecycle management.
+
+## Phase 2F — Frontend and Testing
+- Deployment UI.
+- Container and Compose UI.
+- Domain and certificate UI.
+- Database UI.
+- Job monitoring.
+- Regression tests.
+- Security tests.
+- Documentation.
+
+Complete work in the order that minimizes risk.
+
+Do not attempt an unsafe all-at-once rewrite.
+
+---
+
+# 24. OUT OF SCOPE: PHASE 3
+
+Do not falsely mark the following as complete under Phase 2:
+
+- Full remote application execution through Fleet agents.
+- Distributed multi-node scheduling.
+- Remote Docker execution through authenticated agents.
+- Cross-server application orchestration.
+- Advanced multi-node failover.
+- Kubernetes orchestration.
+- Enterprise multi-tenant control plane.
+
+Prepare clean interfaces that make these possible later.
+
+Do not break the existing Fleet protocol.
+
+---
+
+# 25. ACCEPTANCE CRITERIA
+
+Phase 2 is complete only when the applicable functionality has actually been implemented and verified.
+
+Minimum acceptance criteria:
+
+1. Backend has meaningful modular boundaries.
+2. Dependency versions are consistent and documented.
+3. Existing authentication and RBAC remain functional.
+4. Application records can be created and managed.
+5. Git repositories can be connected securely.
+6. A real deployment can be triggered through the supported runtime.
+7. Deployment jobs persist across restarts.
+8. Build and deployment logs are available.
+9. Deployment history is recorded.
+10. Rollback works for supported deployment types.
+11. Docker lifecycle operations work against a real configured Docker Engine.
+12. Compose projects can be managed.
+13. Health checks reflect real application state.
+14. Domains can be configured through the supported proxy adapter.
+15. HTTPS issuance and renewal are implemented and verifiable.
+16. At least PostgreSQL provisioning works against a real supported runtime.
+17. Database credentials are securely stored.
+18. Environment secrets are protected by Vault.
+19. Sensitive operations are audited.
+20. Frontend screens reflect real backend state.
+21. Existing tests pass.
+22. New tests pass.
+23. Production build succeeds.
+24. TypeScript checks succeed.
+25. Documentation matches implementation.
+
+If infrastructure cannot be accessed in the current environment, clearly distinguish implemented code, mocked tests, and unverified live integrations.
+
+Do not claim all acceptance criteria passed if only a subset was tested.
+
+---
+
+# 26. FINAL EXECUTION INSTRUCTIONS
+
+Start by inspecting the repository and producing a concise internal implementation checklist.
+
+Then implement the work.
+
+For every subphase:
+
+1. Inspect existing implementation.
+2. Identify relevant files.
+3. Make the smallest safe architectural changes.
+4. Implement functionality.
+5. Add or update tests.
+6. Run tests.
+7. Fix regressions.
+8. Update documentation.
+
+Do not stop after planning.
+
+Do not ask me to manually perform work that you can perform in the current workspace.
+
+If a task requires unavailable credentials, infrastructure, or external access, implement the safe integration boundary and document exactly what remains necessary.
+
+Do not overwrite user data.
+
+Do not delete existing functionality.
+
+Do not silently skip failed operations.
+
+Do not fabricate test output.
+
+At the end, produce a detailed report containing:
+
+## A. Implementation Summary
+What was implemented and which modules changed.
+
+## B. Architecture Changes
+New modules, adapters, services, and database migrations.
+
+## C. Features Completed
+List each completed feature and its verification status.
+
+## D. Security Improvements
+RBAC, secrets, command execution, network security, and audit changes.
+
+## E. Test Results
+Exact test counts and commands executed.
+
+## F. Build Results
+TypeScript, frontend build, lint, and other checks.
+
+## G. Live Integration Verification
+Clearly state which Docker, Git, proxy, ACME, and database integrations were tested against real infrastructure versus mocks.
+
+## H. Known Limitations
+List all unfinished items honestly.
+
+## I. Phase 3 Readiness
+Explain what interfaces are ready for remote agents and distributed execution.
+
+## J. Recommended Next Steps
+Identify the highest-priority remaining work.
+
+**FINAL DIRECTIVE: Build a real, secure, maintainable deployment and infrastructure management platform. Do not merely create UI screens or mock APIs. Preserve the existing KATHAL OS foundation, implement actual operational capabilities where the environment permits, verify them, and report the truth.**

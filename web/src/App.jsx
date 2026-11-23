@@ -25,21 +25,45 @@ import Network from './pages/Network'
 import Volumes from './pages/Volumes'
 import Registries from './pages/Registries'
 import Settings from './pages/Settings'
-import { setAuthToken, clearAuthToken, setUnauthorizedHandler, apiFetch } from './hooks/useApi'
+import UsersRoles from './pages/UsersRoles'
+import SecurityConsole from './pages/SecurityConsole'
+import AuditLogs from './pages/AuditLogs'
+import AccessDenied from './pages/AccessDenied'
+import {
+  setAuthToken,
+  clearAuthToken,
+  setUnauthorizedHandler,
+  apiFetch,
+  hasPermission,
+  logoutSession,
+} from './hooks/useApi'
+import { useTheme } from './hooks/useTheme'
 
-function ProtectedRoute({ children, token }) {
-  if (!token) return <Navigate to="/login" replace />
+function ProtectedRoute({ children, authenticated }) {
+  if (!authenticated) return <Navigate to="/login" replace />
+  return children
+}
+
+function PermissionRoute({ children, authenticated, user, permission }) {
+  if (!authenticated) return <Navigate to="/login" replace />
+  if (permission && !hasPermission(user, permission)) {
+    return <AccessDenied requiredPermission={permission} user={user} />
+  }
   return children
 }
 
 export default function App() {
+  const { theme, toggleTheme } = useTheme()
   const [token, setToken] = useState(null)
   const [user, setUser] = useState(null)
+  const [authChecking, setAuthChecking] = useState(true)
   const [sessionNotice, setSessionNotice] = useState('')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [quickLaunchOpen, setQuickLaunchOpen] = useState(false)
   const [deploySignal, setDeploySignal] = useState(0)
   const [updateInfo, setUpdateInfo] = useState(null)
+
+  const authenticated = Boolean(user)
 
   const handleUnauthorized = useCallback((message) => {
     clearAuthToken()
@@ -58,11 +82,33 @@ export default function App() {
       // ignore storage access issues
     }
     setUnauthorizedHandler(handleUnauthorized)
-    return () => setUnauthorizedHandler(null)
+
+    let active = true
+    fetch('/api/v1/auth/session', {
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.user) {
+          setUser(data.user)
+        }
+      })
+      .catch(() => {
+        // Not signed in yet
+      })
+      .finally(() => {
+        if (active) setAuthChecking(false)
+      })
+
+    return () => {
+      active = false
+      setUnauthorizedHandler(null)
+    }
   }, [handleUnauthorized])
 
   useEffect(() => {
-    if (!token) return
+    if (!authenticated) return
     let cancelled = false
     apiFetch('/system/updates')
       .then((res) => {
@@ -72,28 +118,44 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [authenticated, token])
 
   function handleLogin(newToken, newUser) {
     setAuthToken(newToken)
-    setToken(newToken)
+    setToken(newToken || 'cookie-session')
     setUser(newUser)
     setSessionNotice('')
   }
 
-  function handleLogout() {
-    clearAuthToken()
+  async function handleLogout() {
+    await logoutSession()
     setToken(null)
     setUser(null)
+    setUpdateInfo(null)
     setSessionNotice('')
   }
 
-  if (!token) {
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-[#f4f8f3] dark:bg-[#080C08] text-slate-600 dark:text-slate-400 flex items-center justify-center text-sm">
+        Restoring workspace session...
+      </div>
+    )
+  }
+
+  if (!authenticated) {
     return (
       <Routes>
         <Route
           path="/login"
-          element={<Login onLogin={handleLogin} sessionNotice={sessionNotice} />}
+          element={
+            <Login
+              onLogin={handleLogin}
+              sessionNotice={sessionNotice}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+            />
+          }
         />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
@@ -101,7 +163,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#080C08] text-slate-100 overflow-hidden">
+    <div className="flex h-screen bg-[#f4f8f3] dark:bg-[#080C08] text-slate-900 dark:text-slate-100 overflow-hidden">
       <Sidebar
         user={user}
         onLogout={handleLogout}
@@ -112,6 +174,9 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <OfflineIndicator />
         <TopBar
+          user={user}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onOpenMobileNav={() => setMobileNavOpen(true)}
           onOpenQuickLaunch={() => setQuickLaunchOpen(true)}
           updateInfo={updateInfo}
@@ -122,44 +187,211 @@ export default function App() {
             <Route
               path="/"
               element={
-                <ProtectedRoute token={token}>
+                <PermissionRoute authenticated={authenticated} user={user} permission="dashboard.read">
                   <Dashboard
                     externalRefreshKey={deploySignal}
-                    onOpenQuickLaunch={() => setQuickLaunchOpen(true)}
+                    onOpenQuickLaunch={hasPermission(user, 'applications.deploy') ? () => setQuickLaunchOpen(true) : undefined}
                     onUpdateChecked={setUpdateInfo}
                   />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/containers"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Containers key={deploySignal} />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/processes"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <NativeProcesses key={deploySignal} />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/images"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Images />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/registries"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Registries />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/volumes"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Volumes />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/proxy"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="applications.read">
+                  <ProxyManager />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/databases"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="databases.read">
+                  <Databases />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/files"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <FileManager />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/backups"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="backups.create">
+                  <Backups />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/templates"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="applications.read">
+                  <Templates />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/templates/:id"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="applications.read">
+                  <AppDetail />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/git"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="applications.deploy">
+                  <GitDeploy />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/terminal"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="terminal.access">
+                  <Terminal />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/monitoring"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="servers.read">
+                  <Monitoring currentUser={user} />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/logs"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Logs />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/compose"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Compose />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/env"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="secrets.read">
+                  <Env />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/network"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="containers.read">
+                  <Network />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/users"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="users.read">
+                  <UsersRoles currentUser={user} />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/security"
+              element={
+                <ProtectedRoute authenticated={authenticated}>
+                  <SecurityConsole currentUser={user} />
                 </ProtectedRoute>
               }
             />
-            <Route path="/containers" element={<ProtectedRoute token={token}><Containers key={deploySignal} /></ProtectedRoute>} />
-            <Route path="/processes" element={<ProtectedRoute token={token}><NativeProcesses key={deploySignal} /></ProtectedRoute>} />
-            <Route path="/images" element={<ProtectedRoute token={token}><Images /></ProtectedRoute>} />
-            <Route path="/registries" element={<ProtectedRoute token={token}><Registries /></ProtectedRoute>} />
-            <Route path="/volumes" element={<ProtectedRoute token={token}><Volumes /></ProtectedRoute>} />
-            <Route path="/proxy" element={<ProtectedRoute token={token}><ProxyManager /></ProtectedRoute>} />
-            <Route path="/databases" element={<ProtectedRoute token={token}><Databases /></ProtectedRoute>} />
-            <Route path="/files" element={<ProtectedRoute token={token}><FileManager /></ProtectedRoute>} />
-            <Route path="/backups" element={<ProtectedRoute token={token}><Backups /></ProtectedRoute>} />
-            <Route path="/templates" element={<ProtectedRoute token={token}><Templates /></ProtectedRoute>} />
-            <Route path="/templates/:id" element={<ProtectedRoute token={token}><AppDetail /></ProtectedRoute>} />
-            <Route path="/git" element={<ProtectedRoute token={token}><GitDeploy /></ProtectedRoute>} />
-            <Route path="/terminal" element={<ProtectedRoute token={token}><Terminal /></ProtectedRoute>} />
-            <Route path="/monitoring" element={<ProtectedRoute token={token}><Monitoring /></ProtectedRoute>} />
-            <Route path="/logs" element={<ProtectedRoute token={token}><Logs /></ProtectedRoute>} />
-            <Route path="/compose" element={<ProtectedRoute token={token}><Compose /></ProtectedRoute>} />
-            <Route path="/env" element={<ProtectedRoute token={token}><Env /></ProtectedRoute>} />
-            <Route path="/network" element={<ProtectedRoute token={token}><Network /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute token={token}><Settings updateInfo={updateInfo} onUpdateChecked={setUpdateInfo} /></ProtectedRoute>} />
+            <Route
+              path="/audit"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="audit.read">
+                  <AuditLogs />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <PermissionRoute authenticated={authenticated} user={user} permission="settings.read">
+                  <Settings updateInfo={updateInfo} onUpdateChecked={setUpdateInfo} currentUser={user} />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/access-denied"
+              element={
+                <ProtectedRoute authenticated={authenticated}>
+                  <AccessDenied user={user} />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>
 
-      <QuickLaunchModal
-        open={quickLaunchOpen}
-        onClose={() => setQuickLaunchOpen(false)}
-        onDeployed={() => setDeploySignal((n) => n + 1)}
-      />
+      {hasPermission(user, 'applications.deploy') && (
+        <QuickLaunchModal
+          open={quickLaunchOpen}
+          onClose={() => setQuickLaunchOpen(false)}
+          onDeployed={() => setDeploySignal((n) => n + 1)}
+        />
+      )}
     </div>
   )
 }

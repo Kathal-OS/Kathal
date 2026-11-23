@@ -1,0 +1,1194 @@
+# KATHAL OS — ULTIMATE MASTER IMPROVEMENT, REBUILD & EVOLUTION PROMPT
+
+## YOUR ROLE
+
+Act as a world-class team consisting of:
+
+- Principal Software Architect
+- Senior Full-Stack Engineer
+- DevOps and Infrastructure Engineer
+- Operating Systems Engineer
+- Cybersecurity Engineer
+- AI/LLM Engineer
+- UI/UX Designer
+- Product Manager
+- QA and Automation Engineer
+- Open-Source Project Maintainer
+
+Your mission is to deeply inspect, improve, modernize, and evolve **KATHAL OS** into a professional, production-ready, cross-platform infrastructure operating system.
+
+Do not treat this as a simple dashboard redesign. Treat it as a serious software engineering and product evolution project.
+
+The objective is to build a unified platform that combines server management, application deployment, native application installation, container management, infrastructure monitoring, automation, AI operations, and plugin extensibility.
+
+---
+
+# 1. OFFICIAL KATHAL OS GITHUB REPOSITORIES
+
+These are the official repositories. Inspect each repository and understand its purpose before making changes.
+
+### Main project
+
+https://github.com/Kathal-OS
+
+https://github.com/Kathal-OS/Kathal
+
+### Core ecosystem
+
+https://github.com/Kathal-OS/kathal-plugins-sdk
+
+https://github.com/Kathal-OS/kathal-plugins
+
+https://github.com/Kathal-OS/kathal-examples
+
+https://github.com/Kathal-OS/kathal-docs
+
+https://github.com/Kathal-OS/kathal-ci
+
+https://github.com/Kathal-OS/Kathal-CLI
+
+https://github.com/Kathal-OS/OLL-Market
+
+https://github.com/Kathal-OS/.github
+
+Do not assume that every repository is complete or functional. Inspect its actual contents.
+
+# 2. COMPETITOR AND REFERENCE PROJECTS
+
+Study the following projects to understand their architecture, features, user experience, strengths, weaknesses, and opportunities.
+
+### Main competitors
+
+Kiri:
+https://github.com/libracoder/kiri
+
+Coolify:
+https://github.com/coollabsio/coolify
+
+Dokploy:
+https://github.com/dokploy/dokploy
+
+Dokku:
+https://github.com/dokku/dokku
+
+CapRover:
+https://github.com/caprover/caprover
+
+### Additional infrastructure references
+
+Docker:
+https://github.com/moby/moby
+
+Docker Compose:
+https://github.com/docker/compose
+
+BuildKit:
+https://github.com/moby/buildkit
+
+Traefik:
+https://github.com/traefik/traefik
+
+Caddy:
+https://github.com/caddyserver/caddy
+
+Portainer:
+https://github.com/portainer/portainer
+
+CasaOS:
+https://github.com/IceWhaleTech/CasaOS
+
+Cosmos Server:
+https://github.com/azukaar/Cosmos-Server
+
+Podman:
+https://github.com/containers/podman
+
+containerd:
+https://github.com/containerd/containerd
+
+Kubernetes:
+https://github.com/kubernetes/kubernetes
+
+K3s:
+https://github.com/k3s-io/k3s
+
+n8n:
+https://github.com/n8n-io/n8n
+
+Ollama:
+https://github.com/ollama/ollama
+
+Prometheus:
+https://github.com/prometheus/prometheus
+
+Grafana:
+https://github.com/grafana/grafana
+
+OpenTelemetry:
+https://github.com/open-telemetry/opentelemetry-collector
+
+Uptime Kuma:
+https://github.com/louislam/uptime-kuma
+
+MinIO:
+https://github.com/minio/minio
+
+Restic:
+https://github.com/restic/restic
+
+Duplicati:
+https://github.com/duplicati/duplicati
+
+Infisical:
+https://github.com/Infisical/infisical
+
+Headscale:
+https://github.com/juanfont/headscale
+
+Use these projects as technical references. Do not copy their branding, proprietary assets, or code without checking their licenses.
+
+# 3. FIRST: COMPLETE PROJECT AUDIT
+
+Before implementing anything, inspect the existing KATHAL OS project.
+
+Understand:
+
+- Existing folder structure
+- Frontend architecture
+- Backend architecture
+- Programming languages
+- Frameworks and dependencies
+- Database and persistence layer
+- API structure
+- Authentication
+- Application installation engine
+- Process management
+- Docker integration
+- Native Node.js and Python application support
+- Reverse proxy integration
+- Terminal implementation
+- WebSocket implementation
+- File manager
+- Monitoring
+- Backup and restore
+- Plugin architecture
+- CLI
+- Desktop application
+- PWA support
+- Documentation
+- Build and release process
+- Existing tests
+
+Do not destroy working features just to replace them with a new implementation.
+
+Create a detailed audit report.
+
+For every feature, assign one status:
+
+- Implemented and verified
+- Implemented but untested
+- Partially implemented
+- UI only
+- Planned
+- Missing
+- Broken
+- Security concern
+
+Do not claim a feature works unless you have verified it.
+
+Identify duplicated code, architectural problems, unnecessary dependencies, performance bottlenecks, security vulnerabilities, and incomplete integrations.
+
+If a repository cannot be accessed, explicitly mention that limitation and continue with the repositories that are available.
+
+# 4. PRODUCT VISION
+
+Transform KATHAL OS into:
+
+**A unified, local-first, AI-native infrastructure operating system for managing applications, servers, containers, databases, automation, and cloud infrastructure from one interface.**
+
+KATHAL OS should combine the best ideas from:
+
+- Coolify: application deployment
+- Dokploy: modern deployment workflows
+- Dokku: Git-based deployment
+- CapRover: application management
+- Portainer: container management
+- CasaOS: home server experience
+- Kiri: local container runtime experience
+- n8n: workflow automation
+- Grafana: observability
+- Uptime Kuma: uptime monitoring
+- Ollama: local AI execution
+
+However, KATHAL OS must have its own identity, architecture, interface, and ecosystem.
+
+The product should be useful for:
+
+- Individual developers
+- Self-hosting enthusiasts
+- Small businesses
+- DevOps engineers
+- Startups
+- Agencies
+- Infrastructure administrators
+- Enterprise teams
+
+# 5. CORE PRODUCT MODULES
+
+Build a cohesive platform with the following modules.
+
+## A. Dashboard
+
+Create a professional infrastructure overview.
+
+Include:
+
+- Total servers
+- Online and offline servers
+- CPU usage
+- RAM usage
+- Disk usage
+- Network traffic
+- Running applications
+- Running containers
+- Database status
+- Deployment status
+- System health
+- Security alerts
+- Backup status
+- Uptime
+- Recent activities
+- Resource usage charts
+- Quick actions
+
+The dashboard must use real backend data when connected.
+
+Never show fake metrics as real infrastructure information.
+
+## B. Kathal Fleet — Server Management
+
+Build a multi-server management system.
+
+Features:
+
+- Add server
+- Remove server
+- Connect remote server
+- Server authentication
+- Server agent
+- Server groups
+- Server tags
+- Server status
+- Hardware information
+- Operating system information
+- CPU and RAM monitoring
+- Disk monitoring
+- Network monitoring
+- SSH management
+- Server terminal
+- Remote commands
+- Server health checks
+- Agent updates
+- Server activity logs
+
+Support Linux servers first, with a clear architecture for future Windows and macOS support where technically feasible.
+
+Separate the control plane from the execution plane.
+
+## C. Kathal Deploy — Application Deployment
+
+Build a deployment engine inspired by Coolify, Dokploy, and Dokku.
+
+Support:
+
+- GitHub repositories
+- GitLab repositories
+- Git-based deployments
+- GitHub webhooks
+- GitLab webhooks
+- Dockerfile deployments
+- Docker Compose deployments
+- Node.js applications
+- Python applications
+- Static websites
+- PHP applications
+- Go applications
+- Custom build commands
+- Environment variables
+- Build logs
+- Deployment logs
+- Deployment history
+- Deployment status
+- Automatic redeployment
+- Manual deployment
+- Rollbacks
+- Preview deployments
+- Custom domains
+- HTTPS certificates
+- Reverse proxy configuration
+
+Build a reliable deployment lifecycle:
+
+1. Connect repository.
+2. Select branch.
+3. Configure build settings.
+4. Configure environment variables.
+5. Select deployment target.
+6. Build application.
+7. Deploy application.
+8. Configure domain and HTTPS.
+9. Monitor application.
+10. Support rollback.
+
+Do not report successful deployment until the process has actually completed.
+
+## D. Kathal Runtime — Application Runtime Manager
+
+Support multiple runtime types.
+
+- Native Node.js processes
+- Native Python processes
+- Docker containers
+- Docker Compose projects
+- Podman where supported
+- Future Kubernetes integration
+
+Provide:
+
+- Start
+- Stop
+- Restart
+- Reload
+- Logs
+- Process information
+- Resource limits
+- Health checks
+- Automatic restart
+- Runtime configuration
+- Version management
+
+Use proper runtime adapters rather than tightly coupling the application to one execution engine.
+
+## E. Kathal Containers
+
+Create a complete container management interface.
+
+Features:
+
+- Containers
+- Images
+- Volumes
+- Networks
+- Registries
+- Container logs
+- Container terminal
+- Resource monitoring
+- Restart policies
+- Port mappings
+- Environment variables
+- Container inspection
+- Compose project management
+- Image cleanup
+- Container cleanup
+- Container health
+
+Use supported Docker Engine APIs and Compose functionality wherever possible.
+
+Do not create a custom container engine unnecessarily.
+
+## F. Kathal App Store
+
+Improve the existing application catalog.
+
+Support:
+
+- One-click installation
+- Application categories
+- Search
+- Filters
+- Application descriptions
+- Screenshots
+- Documentation
+- Version information
+- Installation requirements
+- Configuration forms
+- Persistent storage
+- Port configuration
+- Domain configuration
+- Environment variables
+- Installation progress
+- Installation logs
+- Update management
+- Uninstall management
+
+Support both native Node.js/Python applications and container-based applications.
+
+Create a standardized application manifest.
+
+Example application categories:
+
+- Databases
+- Web servers
+- CMS and blogs
+- Developer tools
+- Monitoring
+- Media
+- Networking
+- AI and LLM
+- Automation
+- Storage
+- Security
+- Productivity
+
+Make installation templates maintainable and versioned.
+
+Every application must have documented installation requirements and a clear health-check strategy.
+
+## G. Kathal Edge — Domains and Networking
+
+Create centralized networking management.
+
+Features:
+
+- Domain management
+- Subdomains
+- DNS configuration
+- Reverse proxy
+- HTTPS
+- SSL certificates
+- Automatic certificate renewal
+- Port management
+- Firewall integration
+- Network management
+- Proxy routing
+- Private networking
+- Tunnels
+- Access control
+
+Use mature reverse proxy technologies such as Traefik or Caddy through adapters.
+
+Do not expose administrative services publicly by default.
+
+## H. Kathal Database
+
+Create a database management module.
+
+Support appropriate adapters for:
+
+- PostgreSQL
+- MySQL
+- MariaDB
+- MongoDB
+- Redis
+- SQLite
+
+Features:
+
+- Create database
+- Delete database
+- Database status
+- Database credentials
+- Connection strings
+- Database backups
+- Restore
+- Database logs
+- Database resource usage
+- Database user management
+- Connection testing
+
+Never expose database credentials in logs or frontend responses unnecessarily.
+
+## I. Kathal Monitor
+
+Create a professional monitoring and observability platform.
+
+Features:
+
+- CPU monitoring
+- Memory monitoring
+- Disk monitoring
+- Network monitoring
+- Application monitoring
+- Container monitoring
+- Server monitoring
+- Database monitoring
+- Uptime monitoring
+- Health checks
+- Alerts
+- Notifications
+- Historical metrics
+- Log collection
+- Audit events
+
+Use OpenTelemetry, Prometheus, and Grafana-compatible approaches where appropriate.
+
+Allow notification integrations to be added through a modular system.
+
+## J. Kathal Vault — Secrets Management
+
+Create a secure secrets management module.
+
+Features:
+
+- Encrypted secrets
+- Environment variables
+- API keys
+- SSH credentials
+- Database credentials
+- Access policies
+- Secret rotation
+- Secret history
+- Audit logs
+- Scoped access
+- Secure secret injection
+
+Use established cryptographic libraries and secure key management.
+
+Never store sensitive credentials as plaintext.
+
+## K. Kathal Backup
+
+Build a backup and recovery system.
+
+Features:
+
+- Application backups
+- Database backups
+- Volume backups
+- Configuration backups
+- Scheduled backups
+- Manual backups
+- Retention policies
+- Backup encryption
+- Backup verification
+- Restore workflows
+- Backup history
+- Remote storage destinations
+
+Evaluate Restic and other established tools rather than unnecessarily creating a new backup engine.
+
+A backup is not considered successful until its integrity has been checked.
+
+## L. Kathal Flow — Workflow Automation
+
+Create a visual workflow automation system inspired by n8n.
+
+Features:
+
+- Visual workflow editor
+- Trigger nodes
+- Action nodes
+- Conditions
+- Scheduling
+- Webhooks
+- HTTP requests
+- Application events
+- Deployment events
+- Server events
+- Notifications
+- Workflow history
+- Execution logs
+- Error handling
+- Retry logic
+
+Allow workflows to automate routine infrastructure operations.
+
+Include permission checks and confirmation requirements for dangerous operations.
+
+## M. Kathal AI — AI Infrastructure Assistant
+
+Build an AI assistant specifically for infrastructure management.
+
+Capabilities:
+
+- Explain server health
+- Analyze logs
+- Explain errors
+- Suggest deployment fixes
+- Generate configuration files
+- Help configure applications
+- Explain resource usage
+- Recommend optimizations
+- Analyze incidents
+- Generate scripts
+- Assist with database operations
+- Create automation workflows
+
+Support pluggable AI providers, including local model providers such as Ollama and compatible hosted APIs.
+
+Critical requirements:
+
+- AI must not have unrestricted root access.
+- AI must not execute destructive commands without authorization.
+- Show proposed commands before execution.
+- Require approval for sensitive operations.
+- Maintain an audit trail.
+- Provide a clear explanation of actions.
+- Never claim an operation succeeded without backend confirmation.
+
+## N. Kathal Market — Plugin and Application Marketplace
+
+Improve the official plugin ecosystem.
+
+Repositories:
+
+- kathal-plugins-sdk
+- kathal-plugins
+- kathal-examples
+- OLL-Market
+
+Build:
+
+- Plugin discovery
+- Plugin installation
+- Plugin updates
+- Plugin permissions
+- Plugin versioning
+- Plugin dependencies
+- Plugin configuration
+- Plugin documentation
+- Plugin health checks
+- Plugin removal
+- Publisher information
+- Plugin verification
+
+Create a stable plugin SDK with version compatibility rules.
+
+Plugins must run with restricted permissions and must not automatically receive unrestricted system access.
+
+## O. Kathal CLI
+
+Improve the official CLI repository.
+
+Provide commands for:
+
+- Login
+- Logout
+- Server list
+- Server status
+- Application list
+- Application deploy
+- Application restart
+- Application logs
+- Container list
+- Container management
+- Database management
+- Backup
+- Restore
+- Plugin management
+- Configuration
+
+Provide consistent command syntax, helpful errors, documentation, and shell completion where feasible.
+
+## P. Kathal Desk
+
+Improve the desktop experience.
+
+Support:
+
+- Desktop application
+- PWA
+- Responsive web interface
+- Desktop notifications
+- Secure local connection
+- Remote server connection
+- Session management
+- Update notifications
+
+Avoid duplicating the business logic between desktop and web applications.
+
+# 6. ARCHITECTURE AND ENGINEERING
+
+First inspect the actual current architecture.
+
+The project may contain architectural differences between its documentation and implementation. Identify these differences and propose one authoritative architecture.
+
+Do not blindly rewrite everything.
+
+Preferred architectural principles:
+
+- Modular monolith initially
+- Clear module boundaries
+- API-first design
+- Control plane and execution plane separation
+- Secure remote agents
+- Adapter-based integrations
+- Consistent data models
+- Centralized authentication and authorization
+- Structured logging
+- Persistent configuration
+- Database migrations
+- Background job processing
+- Event-driven operations where useful
+- Versioned APIs
+
+Create a clear architecture document.
+
+Include:
+
+- Architecture diagram
+- Module dependency diagram
+- Data flow diagram
+- Authentication flow
+- Agent communication flow
+- Deployment lifecycle
+- Plugin execution model
+- Database schema
+- API specification
+- Security boundaries
+
+Choose technologies based on the existing project and practical engineering needs. Do not migrate languages or frameworks merely because they are fashionable.
+
+# 7. SECURITY REQUIREMENTS
+
+Security is a core product feature.
+
+Audit and improve:
+
+- Authentication
+- Authorization
+- Role-based access control
+- Multi-user access
+- Two-factor authentication
+- Session expiration
+- API token management
+- SSH credential management
+- WebSocket authentication
+- Terminal security
+- CSRF protection
+- XSS protection
+- SQL injection protection
+- Command injection protection
+- SSRF protection
+- File upload security
+- Path traversal protection
+- Rate limiting
+- Secure HTTP headers
+- Audit logs
+- Secret encryption
+- Backup encryption
+- Plugin isolation
+- Dependency vulnerabilities
+- Agent authentication
+- TLS communication
+
+For WebSocket terminal connections, avoid long-lived credentials in URL query parameters. Prefer short-lived, single-use connection tickets and secure authentication.
+
+Do not expose sensitive internal services publicly by default.
+
+Require confirmation for destructive operations.
+
+Create a security checklist and threat model.
+
+# 8. UI/UX REDESIGN
+
+Create a premium, modern, professional infrastructure dashboard.
+
+The interface should feel like a combination of:
+
+- Linear
+- Vercel
+- Railway
+- Portainer
+- Coolify
+- Modern developer tools
+
+Design principles:
+
+- Clean interface
+- Modern typography
+- Consistent spacing
+- Professional icons
+- Clear visual hierarchy
+- Responsive layouts
+- Light and dark modes
+- Accessible color contrast
+- Fast navigation
+- Minimal unnecessary decoration
+- Consistent design tokens
+
+Main navigation:
+
+1. Overview
+2. Fleet
+3. Deployments
+4. Applications
+5. Containers
+6. Databases
+7. Networking
+8. Monitoring
+9. Backups
+10. Automation
+11. AI Assistant
+12. Marketplace
+13. Terminal
+14. Settings
+
+Create polished pages for each module.
+
+Include:
+
+- Loading states
+- Empty states
+- Error states
+- Confirmation dialogs
+- Success and failure notifications
+- Search
+- Filters
+- Sorting
+- Pagination
+- Context menus
+- Responsive tables
+- Detail panels
+
+Do not build a beautiful frontend with fake functionality.
+
+Every button, form, menu, and action must work or be clearly marked as unavailable.
+
+# 9. DATA AND API DESIGN
+
+Review the current database and API implementation.
+
+Create consistent models for:
+
+- Users
+- Roles
+- Permissions
+- Servers
+- Agents
+- Applications
+- Deployments
+- Containers
+- Images
+- Volumes
+- Networks
+- Databases
+- Domains
+- Certificates
+- Secrets
+- Backups
+- Workflows
+- Plugins
+- Notifications
+- Audit events
+- System settings
+
+Requirements:
+
+- Database migrations
+- Input validation
+- Consistent API responses
+- Error handling
+- Pagination
+- Filtering
+- Authentication middleware
+- Authorization middleware
+- API versioning
+- Request logging
+- Rate limiting
+- Idempotency for sensitive operations where appropriate
+
+Use real persistence instead of temporary in-memory state for production functionality.
+
+# 10. TESTING AND QUALITY ASSURANCE
+
+Build a proper testing system.
+
+Include:
+
+- Unit tests
+- Integration tests
+- API tests
+- Frontend tests
+- End-to-end tests
+- Installation tests
+- Upgrade tests
+- Backup and restore tests
+- Security tests
+- Plugin compatibility tests
+- Agent communication tests
+- Deployment lifecycle tests
+
+Test failure cases, not only successful operations.
+
+Test clean installation and upgrades on supported operating systems.
+
+Create CI pipelines for:
+
+- Linting
+- Type checking
+- Tests
+- Security scanning
+- Dependency checks
+- Build verification
+- Release validation
+
+Do not mark a task complete simply because the code compiles.
+
+# 11. OFFICIAL REPOSITORY IMPROVEMENT PLAN
+
+Review each official repository and make improvements according to its responsibility.
+
+### Kathal
+
+Main application, dashboard, backend, runtime, deployment, server management, security, and integrations.
+
+### kathal-plugins-sdk
+
+Stable plugin APIs, TypeScript types, lifecycle hooks, permission system, developer documentation, and compatibility rules.
+
+### kathal-plugins
+
+Official plugins, maintenance, versioning, testing, security, and compatibility.
+
+### kathal-examples
+
+Working examples, starter templates, tutorials, and reference integrations.
+
+### kathal-docs
+
+Complete documentation, architecture, installation, configuration, deployment, security, API, CLI, plugin development, and troubleshooting guides.
+
+### kathal-ci
+
+Reusable CI workflows, automated testing, release automation, security scanning, and build validation.
+
+### Kathal-CLI
+
+Reliable CLI commands, authentication, API integration, configuration, help documentation, and release process.
+
+### OLL-Market
+
+Marketplace architecture, application manifests, plugin catalog, validation, publisher metadata, versioning, and distribution.
+
+### .github
+
+Organization profile, issue templates, pull request templates, contribution guidelines, security policy, code of conduct, and repository standards.
+
+Ensure that all repositories follow consistent naming, versioning, documentation, and release practices.
+
+# 12. COMPETITIVE GAP ANALYSIS
+
+Compare KATHAL OS with:
+
+- Kiri
+- Coolify
+- Dokploy
+- Dokku
+- CapRover
+- Portainer
+- CasaOS
+
+Create a comparison table containing:
+
+- Feature
+- KATHAL OS status
+- Competitor implementation
+- KATHAL opportunity
+- Implementation difficulty
+- Priority
+- Dependencies
+- Acceptance criteria
+
+Identify features worth adopting, features worth improving, and features KATHAL should avoid.
+
+Do not claim KATHAL is better than competitors without evidence.
+
+Focus on building a genuinely differentiated product.
+
+# 13. DEVELOPMENT ROADMAP
+
+Organize the work into practical phases.
+
+### PHASE 0 — Audit and Foundation
+
+- Repository audit
+- Architecture documentation
+- Dependency review
+- Security review
+- Database review
+- Testing baseline
+- Technical debt report
+- Product requirements
+
+### PHASE 1 — Core Platform
+
+- Authentication
+- Authorization
+- Dashboard
+- Server management
+- Application lifecycle
+- Runtime management
+- Persistent storage
+- Logging
+- Background jobs
+
+### PHASE 2 — Deployment Platform
+
+- Git integrations
+- Dockerfile deployment
+- Compose deployment
+- Build engine
+- Deployment logs
+- Rollbacks
+- Domains
+- HTTPS
+- Environment management
+
+### PHASE 3 — Infrastructure Management
+
+- Remote agents
+- Fleet management
+- Container management
+- Database management
+- Monitoring
+- Alerts
+- Backups
+- Restore
+
+### PHASE 4 — Ecosystem
+
+- Plugin SDK
+- Plugin marketplace
+- Application catalog
+- CLI
+- Documentation
+- CI/CD improvements
+
+### PHASE 5 — Advanced Platform
+
+- Workflow automation
+- AI assistant
+- AI-assisted operations
+- Multi-server orchestration
+- Advanced observability
+- Advanced networking
+- Enterprise features
+
+### PHASE 6 — Future Expansion
+
+- Kubernetes integration
+- Advanced orchestration
+- Multi-tenant management
+- Team collaboration
+- Enterprise policies
+- Mobile management experience
+
+Do not implement every feature simultaneously.
+
+Prioritize foundational reliability, security, and deployment correctness.
+
+# 14. IMPLEMENTATION RULES
+
+Follow these rules strictly:
+
+1. Inspect the existing code before changing it.
+2. Preserve working features.
+3. Avoid unnecessary rewrites.
+4. Do not introduce unnecessary dependencies.
+5. Do not duplicate existing functionality.
+6. Use reusable components and services.
+7. Follow existing coding conventions unless there is a documented reason to improve them.
+8. Write maintainable production-quality code.
+9. Add tests for new functionality.
+10. Update documentation when behavior changes.
+11. Handle errors properly.
+12. Validate user input.
+13. Protect credentials and sensitive data.
+14. Do not hardcode secrets.
+15. Do not use fake backend responses in production features.
+16. Do not leave placeholder buttons presented as working features.
+17. Do not silently ignore failed operations.
+18. Do not perform destructive actions without authorization.
+19. Do not claim that code was tested if it was not.
+20. Do not claim that GitHub repositories were modified unless changes were actually made.
+
+If an operation requires permissions, credentials, unavailable infrastructure, or external services, explain what is required.
+
+When working in an environment with repository write access, implement changes directly and verify them. When write access is unavailable, provide exact code changes, patches, specifications, or implementation instructions.
+
+# 15. REQUIRED DELIVERABLES
+
+Produce the following deliverables.
+
+1. Complete repository audit
+2. Existing architecture report
+3. Proposed architecture
+4. Competitor feature comparison
+5. Feature gap analysis
+6. Security audit and threat model
+7. UI/UX improvement plan
+8. Database and API improvement plan
+9. Repository-by-repository action plan
+10. Prioritized development roadmap
+11. Testing strategy
+12. Deployment and release strategy
+13. Documentation improvement plan
+14. Implementation progress report
+15. Known limitations and unresolved issues
+
+For each implementation task, include:
+
+- Task name
+- Problem
+- Proposed solution
+- Affected files or repositories
+- Dependencies
+- Priority
+- Implementation status
+- Testing requirements
+- Acceptance criteria
+
+# 16. FINAL PRODUCT STANDARD
+
+The final KATHAL OS should deliver one cohesive experience.
+
+A user should be able to:
+
+1. Install KATHAL OS.
+2. Access the dashboard securely.
+3. Add a local or remote server.
+4. Monitor infrastructure.
+5. Install applications.
+6. Deploy Git repositories.
+7. Manage containers.
+8. Manage databases.
+9. Configure domains and HTTPS.
+10. View logs and metrics.
+11. Schedule backups.
+12. Restore applications and databases.
+13. Automate infrastructure workflows.
+14. Use AI to understand and troubleshoot infrastructure.
+15. Extend the platform with plugins.
+16. Manage infrastructure through the CLI.
+
+The platform should be reliable, secure, modular, maintainable, extensible, and easy to use.
+
+---
+
+# 17. START WORKING NOW
+
+Begin by inspecting all accessible official KATHAL OS repositories.
+
+Do not immediately generate a new application or replace the existing project.
+
+First understand what already exists.
+
+Then:
+
+1. Produce the audit.
+2. Identify the highest-impact problems.
+3. Create the architecture plan.
+4. Build the prioritized implementation roadmap.
+5. Start implementing Phase 0 and Phase 1.
+6. Test each change.
+7. Update documentation.
+8. Report completed work and remaining work.
+
+Work incrementally. Make real improvements rather than generating large amounts of unverified code.
+
+**ULTIMATE GOAL: Build KATHAL OS into a unified infrastructure operating system that brings application deployment, server management, containers, native runtimes, automation, monitoring, AI operations, and an extensible open-source ecosystem together in one powerful platform.**
+
+Build it with engineering discipline. Preserve what works. Improve what is weak. Replace what is broken. Verify what you build.
+
+**KATHAL OS — One Platform. Complete Infrastructure Control.**

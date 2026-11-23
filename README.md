@@ -57,8 +57,8 @@
 | **Service Engine (`ServiceManager`)** | Spawns and tracks native services via `node:child_process`, maintains persistent state (`data/services-state.json`), records `stdout`/`stderr`/`system` logs, polls HTTP/TCP health endpoints, and tracks resource history. |
 | **Native Process Manager** | Distinct view listing live OS processes + custom launched host binaries/scripts with real-time CPU%, memory footprint, PID, working directory checks, and HTTP probing. |
 | **Domains & Reverse Proxy** | Dual routing: instant `/live/<appName>/` path proxy plus custom `Host`-header domain mappings saved to `data/reverse-proxy.json`, with connection testing and enable/disable toggles. |
-| **Web Terminal & File Manager** | Authenticated WebSocket terminal (`/api/v1/terminal/ws/:id`) and browser-based File Manager supporting directory browsing, editing, uploads (`50 MB` limit), renaming, and deletion. |
-| **DevOps & Data Utilities** | Git repository management with webhook auto-deploy, Compose stack viewer/scanner, environment variable store, database manager, network/volume/registry views, and JSON backup export/restore. |
+| **Web Terminal & File Manager** | Single-use ticket-authenticated WebSocket terminal (`/api/v1/terminal/ws/:id?ticket=<wsTicket>`) and browser-based File Manager supporting directory browsing, editing, uploads (`50 MB` limit), renaming, and deletion. |
+| **Fleet, Audit & DevOps** | Local & remote node inventory with TCP reachability probes (`/api/v1/fleet/servers`), persistent audit log (`/api/v1/audit`), HMAC-signed Git webhook deploys, Compose viewer/scanner, masked/encrypted env secrets, database manager, and compressed ZIP backup export/restore. |
 
 ---
 
@@ -128,8 +128,8 @@ Or install KATHAL OS directly from Chrome/Edge/Safari using the built-in **PWA I
 ### First-Time Administrator Setup
 
 1. Open **http://127.0.0.1:3000** in your browser (or launch `npm run desktop`).
-2. If `KATHAL_ADMIN_PASSWORD` is unset, KATHAL OS prompts you on `/login` to claim your local administrator email and password on first run.
-3. Log in to receive a local JWT session token and access the full control panel.
+2. If `KATHAL_ADMIN_PASSWORD` is unset, KATHAL OS prompts you on `/login` to claim the initial **Owner** account on first run.
+3. Sign in to receive an `HttpOnly` session cookie (plus Bearer session token for CLI/API clients) with full Role-Based Access Control (`Owner`, `Administrator`, `Operator`, `Developer`, `Viewer`).
 
 ---
 
@@ -178,7 +178,7 @@ flowchart TB
 
 ```text
 .
-├── server.ts                  # Express API, live reverse proxy, WebSocket terminal, Vite/static serving
+├── server.ts                  # Express API gateway, reverse proxy, WebSocket upgrade & Vite/static serving
 ├── electron/
 │   └── main.cjs               # Cross-platform Electron desktop wrapper & backend supervisor
 ├── scripts/
@@ -186,6 +186,16 @@ flowchart TB
 │   ├── install-mac.sh         # macOS installer + optional launchd LaunchAgent setup
 │   └── install.sh             # Linux installer + systemd unit template output
 ├── src/
+│   ├── config/                # RuntimeConfig loader & session/policy env parsing
+│   ├── database/              # DatabaseManager (node:sqlite WAL/FK/backups), schema migrations & JSON-to-SQLite migrator
+│   ├── repositories/          # PlatformRepository transactional SQLite sync & hydration
+│   ├── security/              # VaultManager (AES-256-GCM v2 + key rotation) & scrypt/bcrypt password hashing
+│   ├── auth/                  # AuthService (revocable sessions, lockout, resets) & 5-role/26-perm RbacService
+│   ├── audit/                 # AuditService with recursive secret redaction & paginated queries
+│   ├── fleet/                 # FleetService with DNS-resolving SSRF checks, TCP probes & agent heartbeats
+│   ├── middleware/            # Cookie/Bearer authMiddleware, CSRF Origin check, requirePermission & rate limiter
+│   ├── websocket/             # TerminalGateway (Origin check, single-use wsTicket, per-user cap, session teardown)
+│   ├── routes/                # Modular routers: authRoutes, userRoutes, vaultRoutes, fleetRoutes, auditRoutes, databaseAdminRoutes
 │   ├── platform.ts            # OS detection, PATH search, venv resolution, archive extraction, process kill/metrics
 │   ├── installerEngine.ts     # Preflight checks, runtime probes, isolated app installs, health verification
 │   ├── serviceManager.ts      # Native child-process lifecycle, persistent state, log capture, health polling
@@ -194,27 +204,45 @@ flowchart TB
 │   ├── localRuntime.ts        # Confined app directories, domain/proxy/Git URL validation, HTTP probing
 │   ├── systemMonitor.ts       # Real-time CPU, memory, and disk usage collector (node:os + fs.statfsSync)
 │   ├── proxyConfig.ts         # JSON config manager for reverse-proxy.json
+│   ├── persistence.ts         # Legacy Phase 1 PersistenceManager preserved for import compatibility
+│   ├── backupManager.ts       # Zero-dependency compressed PKZIP export & Zip-Slip/CRC-safe restore
+│   ├── updateChecker.ts       # Semver comparator & GitHub Releases auto-update checker
 │   ├── appRegistry.ts         # Central registry loader/serializer (data/registry.json)
 │   ├── templates.ts           # Registry & template lookup/search API helpers
 │   ├── templateTypes.ts       # Shared TypeScript interfaces for apps, health checks, and install commands
 │   ├── catalogPart1.ts        # Curated app definitions (part 1)
 │   ├── catalogPart2.ts        # Curated app definitions (part 2)
 │   ├── catalogPart3.ts        # Curated app definitions (part 3)
-│   └── store.ts               # In-memory operational state, monitoring ring buffer, compose/git/file/backup state
+│   └── store.ts               # In-memory operational state & monitoring ring buffer
+├── tests/
+│   ├── core.test.ts           # Core unit & HTTP/WebSocket security integration tests (12 tests)
+│   └── phase1_5.test.ts       # SQLite, Auth, RBAC, Vault v2, WS, Audit & Fleet integration tests (11 tests)
+├── docs/
+│   ├── AUDIT_AND_ARCHITECTURE.md     # Repo audit, architecture blueprints, threat model & Phases 0–6 roadmap
+│   ├── PHASE_1_5_AUDIT.md            # Phase 1.5 severity-classified audit findings
+│   ├── DATABASE_MIGRATION.md         # SQLite schema, migrations, hot backup & JSON-to-SQLite migration
+│   ├── VAULT_SECURITY.md             # Vault v2 encryption format, lock/recovery & Owner key rotation
+│   ├── RBAC_AND_AUTHENTICATION.md    # scrypt auth, HttpOnly sessions, CSRF & 5-role/26-perm RBAC matrix
+│   ├── FLEET_AGENT_PROTOCOL.md       # DNS/SSRF validation & agent heartbeat wire protocol
+│   └── PHASE_1_5_RELEASE_NOTES.md    # Phase 1.5 changelog & upgrade guide
 ├── web/
 │   ├── vite.config.js         # Vite configuration & /api dev proxy
 │   ├── public/                # PWA icons, manifest, and service worker assets
 │   └── src/
-│       ├── App.jsx            # Client routes (Dashboard, Processes, App Store, Proxy, Terminal, etc.)
+│       ├── App.jsx            # Client routes + Light/Dark theme + cookie session restore + RBAC gating
 │       ├── components/        # Sidebar, TopBar, SystemMonitor, HostMonitoringWidget, PWAInstallButton, etc.
-│       └── pages/             # 21 UI views including Templates, AppDetail, NativeProcesses, ProxyManager, Terminal
+│       └── pages/             # 25 UI views including UsersRoles, SecurityConsole, AuditLogs, AccessDenied
 ├── data/
+│   ├── kathal.db              # Embedded SQLite database (WAL + foreign keys, auto-migrated from Phase 1 JSON)
 │   ├── registry.json          # Auto-bootstrapped 134-app catalog metadata
 │   ├── reverse-proxy.json     # Persisted custom domain -> localhost:port rules & proxy settings
+│   ├── services-state.json    # Managed service records, working directories, ports, and metadata
+│   ├── backups/               # On-demand & pre-migration SQLite snapshots + ZIP archives
 │   └── apps/                  # Isolated per-application install & data directories
 ├── deploy/
 │   └── apps.json              # Sample deployment manifest
 ├── .env.example               # Environment variable template
+├── Dockerfile                 # Multi-stage Node.js 22 production container (:3000)
 └── package.json               # Root scripts and dependencies
 ```
 
@@ -278,13 +306,22 @@ Copy `.env.example` to `.env` (or export variables in your shell/service) to cus
 | `KATHAL_ADMIN_EMAIL` | `admin@kathal.local` | Default administrator login email |
 | `KATHAL_ADMIN_PASSWORD` | *(empty — UI setup)* | Optional pre-set admin password; leave blank to set via `/login` on first run |
 | `KATHAL_JWT_SECRET` | *(random 32-byte hex)* | Secret for signing local JWT session tokens |
+| `KATHAL_VAULT_KEY` | *(auto-generated `.vault-key`)* | 32-byte hex/passphrase key for AES-256-GCM encryption of persisted secrets |
 | `KATHAL_DATA_DIR` | `./data` | Root directory for persisted JSON state files |
 | `KATHAL_APPS_DIR` | `./data/apps` | Isolated root directory where native apps are installed |
 | `KATHAL_PROXY_CONFIG_FILE` | `./data/reverse-proxy.json` | Optional custom path for persisted reverse proxy configuration |
 | `KATHAL_LOG_LEVEL` | `info` | Server log verbosity |
+| `KATHAL_ALLOW_SELF_REGISTRATION` | `false` | Enables `/api/v1/auth/register` (assigns `Viewer` role when `true`) |
+| `KATHAL_SESSION_IDLE_HOURS` | `12` | Sliding idle expiration window for active user sessions |
+| `KATHAL_SESSION_MAX_HOURS` | `72` | Hard absolute session lifetime before re-login |
+| `KATHAL_COOKIE_SECURE` | `false` | Forces `Secure; SameSite=None; Partitioned` session cookies |
+| `KATHAL_ALLOWED_ORIGINS` | *(empty)* | Optional comma-separated extra Origins permitted for WebSocket upgrades |
+| `KATHAL_FLEET_ALLOW_PRIVATE_NETWORKS` | `true` | Allows RFC1918 LAN targets in Fleet probes (loopback/metadata stay blocked) |
 
-### Persisted Local Files (`./data/`)
+### Persisted Local Data (`./data/`)
 
+- `data/kathal.db` — Embedded SQLite database (WAL mode, `PRAGMA foreign_keys = ON`, transactional migrations) storing users, roles, permissions, sessions, fleet servers, server status history, applications, deployments, databases, domains, Vault v2 secrets, backups, Git repos/logs, settings, and structured audit events.
+- Legacy JSON files (`auth-state.json`, `platform-state.json`, `audit-log.json`) from Phase 1 are automatically validated and imported once into `kathal.db` with a pre-migration snapshot and retained on disk for recovery safety.
 - `data/registry.json` — Bootstrapped 134-app catalog (reloadable via `POST /api/v1/registry/reload`)
 - `data/reverse-proxy.json` — Reverse proxy settings and domain-to-localhost port mappings
 - `data/services-state.json` — Managed service records, working directories, ports, and metadata
@@ -294,29 +331,34 @@ Copy `.env.example` to `.env` (or export variables in your shell/service) to cus
 
 ## API & WebSocket Reference
 
-All `/api/v1/*` routes (except `/health`, `/login`, `/auth/status`, and `/auth/setup`) require `Authorization: Bearer <token>`.
+All `/api/v1/*` routes (except `/health`, `/login`, `/auth/login`, `/auth/status`, `/auth/setup`, `/auth/register`, `/auth/password-reset/confirm`, `/fleet/agent/heartbeat`, and cryptographically signed webhook endpoints) require an authenticated `HttpOnly` session cookie or `Authorization: Bearer <token>` and backend RBAC permission enforcement.
 
 | Group | Key Endpoints |
 | :--- | :--- |
-| **Auth & Health** | `GET /api/v1/auth/status`, `POST /api/v1/auth/setup`, `GET /api/v1/auth/session`, `POST /api/v1/login`, `GET /api/v1/health` |
-| **System & Platform** | `GET /api/v1/status`, `GET /api/v1/platform/installers`, `GET /api/v1/desktop/info`, `GET /api/v1/system`, `GET /api/v1/system/monitor`, `GET /api/v1/system/updates`, `POST /api/v1/system/check-updates`, `GET /api/v1/metrics`, `GET/PUT /api/v1/settings` |
+| **Auth, Users & RBAC** | `GET /api/v1/auth/{status,session,me,sessions}`, `POST /api/v1/auth/{setup,register,login,logout,change-password}`, `POST /api/v1/auth/password-reset/{request,confirm}`, `DELETE /api/v1/auth/sessions/:sessionId`, `GET/POST/PATCH/DELETE /api/v1/users`, `PUT /api/v1/users/:id/roles`, `GET /api/v1/{roles,permissions}` |
+| **Vault & SQLite Ops** | `GET /api/v1/vault/{status,recovery,secrets}`, `POST /api/v1/vault/rotate`, `POST /api/v1/vault/secrets/:key/{reveal,rotate}`, `GET /api/v1/system/database/{status,migrations}`, `POST /api/v1/system/database/{integrity,backup}` |
+| **System, Fleet & Audit** | `GET /api/v1/status`, `GET /api/v1/platform/installers`, `GET /api/v1/desktop/info`, `GET /api/v1/system`, `GET /api/v1/system/monitor`, `GET /api/v1/system/updates`, `POST /api/v1/system/check-updates`, `GET/PUT /api/v1/settings`, `POST /api/v1/settings/{reveal-webhook,regenerate-webhook}`, `GET/POST /api/v1/fleet/servers`, `POST /api/v1/fleet/servers/:id/{probe,agent-token}`, `GET /api/v1/fleet/servers/:id/history`, `POST /api/v1/fleet/agent/heartbeat`, `DELETE /api/v1/fleet/servers/:id`, `GET /api/v1/audit` |
 | **App Registry & Installer** | `GET /api/v1/runtimes`, `GET /api/v1/registry`, `GET /api/v1/registry/apps/:id`, `POST /api/v1/registry/reload`, `GET /api/v1/templates`, `GET /api/v1/templates/search`, `GET /api/v1/templates/categories`, `GET /api/v1/templates/:id/preflight`, `POST /api/v1/templates/:id/install` |
 | **Installations** | `GET /api/v1/installations`, `GET /api/v1/installations/:id`, `POST /api/v1/installations/:id/{start,stop,restart,health}`, `PUT /api/v1/installations/:id/env`, `DELETE /api/v1/installations/:id` |
 | **Service Engine** | `GET/POST /api/v1/services`, `GET /api/v1/services/:id`, `GET /api/v1/services/:id/{logs,metrics}`, `POST /api/v1/services/:id/{start,stop,restart,health}`, `DELETE /api/v1/services/:id` |
 | **Native Processes** | `GET /api/v1/native-processes`, `GET/POST /api/v1/processes`, `POST /api/v1/processes/:id/{start,stop,restart,probe}`, `GET /api/v1/processes/:id/logs`, `DELETE /api/v1/processes/:id` |
 | **Reverse Proxy** | `GET/PUT /api/v1/proxy/config`, `GET/POST /api/v1/proxy`, `GET/PUT/DELETE /api/v1/proxy/:id`, `POST /api/v1/proxy/:id/{test,enable,disable}` |
-| **Ops & Utilities** | `/api/v1/files/*`, `/api/v1/backups/*`, `/api/v1/git/*`, `/api/v1/databases/*`, `/api/v1/compose/*`, `/api/v1/env/*`, `/api/v1/network/*`, `/api/v1/volumes/*`, `/api/v1/registries/*`, `/api/v1/monitoring/{current,history}`, `/api/v1/logs/*` |
-| **WebSocket Terminal** | `POST /api/v1/terminal/sessions`, `DELETE /api/v1/terminal/sessions/:id`, `WS /api/v1/terminal/ws/:id?token=<jwt>` |
+| **Ops & Utilities** | `/api/v1/files/*`, `/api/v1/backups/*`, `/api/v1/git/*`, `/api/v1/webhooks/git/:id`, `/api/v1/databases/*`, `/api/v1/compose/*`, `/api/v1/env/*`, `POST /api/v1/env/:key/reveal`, `/api/v1/network/*`, `/api/v1/volumes/*`, `/api/v1/registries/*`, `/api/v1/monitoring/{current,history}`, `/api/v1/logs/*` |
+| **WebSocket Terminal** | `POST /api/v1/terminal/sessions`, `DELETE /api/v1/terminal/sessions/:id`, `WS /api/v1/terminal/ws/:id?ticket=<wsTicket>` |
 
 ---
 
 ## Security & Local-First Guarantees
 
-- **No Shell Command Interpolation**: Child processes and archive/system tools execute with `shell: false` via `execFile` / `spawn`, and Windows PowerShell helpers read parameters from environment variables instead of interpolated strings.
-- **Path & Directory Confinement**: Installed applications are confined inside `KATHAL_APPS_DIR`, and writes targeting protected OS directories (`SystemRoot`, `Program Files`, `/etc`, `/proc`, `/System`, `/Library`, etc.) are rejected.
-- **Strict Download & Git Allowlists**: Binary downloads enforce HTTPS against an explicit host allowlist (`github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `releases.hashicorp.com`, `dl.min.io`, `codeberg.org`); Git clones validate public `https://` URLs.
-- **Loopback Proxy Protection**: Custom reverse proxy targets in `reverse-proxy.json` are validated to target only `localhost` / `127.0.0.1` ports (`1`–`65535`).
-- **Authentication & Rate Limiting**: Passwords are hashed with `bcryptjs` (cost 10), sessions use signed JWTs, and `/api/v1/login` enforces a 5-failure / 5-minute account lockout.
+- **Vault v2 Encryption, Anti-Overwrite Protection & Key Rotation**: Persisted secrets are sealed in SQLite using `enc:v2:<kid>:<iv>:<tag>:<cipher>` (AES-256-GCM with AAD-bound key IDs and backward `enc:v1:` decryption); missing/mismatched keys refuse to overwrite existing secrets (`VaultLockedError` recovery mode), and Owners can atomically re-encrypt all vault records via `POST /api/v1/vault/rotate`.
+- **Multi-User Auth, Sessions & 5-Role RBAC**: Passwords use memory-hard OpenSSL `crypto.scrypt` (`N=32768`) with transparent legacy `bcryptjs` upgrade; sessions are revocable in SQLite (`HttpOnly` cookies with Origin/`X-Requested-With` CSRF checks + Bearer lookup); all routes enforce backend `Owner`/`Administrator`/`Operator`/`Developer`/`Viewer` permission checks with final-Owner protection.
+- **Hardened WebSocket Terminal & Webhook HMACs**: Terminal sockets validate `Origin`, `terminal.access`, 60s single-use tickets (`crypto.timingSafeEqual`), and per-user socket limits, closing immediately (`4001`) if the auth session is logged out or revoked; Git webhook triggers verify raw-body `X-Hub-Signature-256` HMAC-SHA256 signatures.
+- **No Shell Command Interpolation & Path Confinement**: Child processes and OS installers invoke executables directly with `shell: false`; installed applications stay confined inside `KATHAL_APPS_DIR`, ZIP restores verify CRC-32 checksums and block path traversal, and Fleet probes resolve DNS prior to socket connection to reject loopback and cloud metadata ranges.
+
+For full Phase 1.5 design & operational guides, see:
+- [`docs/PHASE_1_5_RELEASE_NOTES.md`](docs/PHASE_1_5_RELEASE_NOTES.md) & [`docs/PHASE_1_5_AUDIT.md`](docs/PHASE_1_5_AUDIT.md)
+- [`docs/DATABASE_MIGRATION.md`](docs/DATABASE_MIGRATION.md), [`docs/VAULT_SECURITY.md`](docs/VAULT_SECURITY.md), [`docs/RBAC_AND_AUTHENTICATION.md`](docs/RBAC_AND_AUTHENTICATION.md), and [`docs/FLEET_AGENT_PROTOCOL.md`](docs/FLEET_AGENT_PROTOCOL.md)
+- [`docs/AUDIT_AND_ARCHITECTURE.md`](docs/AUDIT_AND_ARCHITECTURE.md) and [`walkthrough.md`](walkthrough.md)
 
 ---
 
@@ -329,8 +371,14 @@ npm install
 # Run TypeScript type check
 npm run lint
 
+# Run unit & security integration test suite
+npm test
+
 # Build production React frontend (web/dist) + verify TypeScript
 npm run build
+
+# Build and run with Docker on port 3000
+docker compose up -d --build
 
 # Start development server (Express API + Vite middleware on port 3000)
 npm run dev

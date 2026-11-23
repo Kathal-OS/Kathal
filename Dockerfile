@@ -1,41 +1,43 @@
-# ---- Build frontend ----
-FROM node:20-alpine AS frontend
-WORKDIR /app/web
-COPY web/package*.json ./
+# ---- Build stage ----
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+COPY web/package*.json web/
 RUN npm ci
-COPY web/ ./
+
+COPY . .
 RUN npm run build
 
-# ---- Build backend ----
-FROM golang:1.25-alpine AS builder
-
-RUN apk add --no-cache git ca-certificates
-WORKDIR /src
-
-# Cache dependencies.
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source.
-COPY . .
-
-# Copy built frontend into embed path.
-COPY --from=frontend /app/web/dist cmd/kathal/web/dist
-
-# Build a statically-linked binary.
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o /bin/kathal ./cmd/kathal
-
 # ---- Runtime stage ----
-FROM gcr.io/distroless/static-debian12
+FROM node:22-alpine
 
-COPY --from=builder /bin/kathal /kathal
+RUN apk add --no-cache git python3 py3-pip ca-certificates tzdata
 
+WORKDIR /app
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/web/package*.json web/
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/web/dist ./web/dist
+COPY --from=builder /app/server.ts ./server.ts
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/deploy ./deploy
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/.env.example ./.env.example
+
+RUN mkdir -p /data /data/apps
 VOLUME /data
 
-ENV KATHAL_HTTP_ADDR=:8080
-ENV KATHAL_DB_PATH=/data/kathal.db
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV KATHAL_DATA_DIR=/data
+ENV KATHAL_APPS_DIR=/data/apps
 
-EXPOSE 8080
+EXPOSE 3000
 
-ENTRYPOINT ["/kathal"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+CMD ["./node_modules/.bin/tsx", "server.ts"]

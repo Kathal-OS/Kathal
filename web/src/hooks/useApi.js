@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
-// Session token is held strictly in JS memory (never localStorage/sessionStorage)
+// Optional Bearer token kept strictly in JS memory; HttpOnly kathal_session cookie
+// also authenticates requests seamlessly via credentials: 'same-origin'.
 let memoryToken = null
 let unauthorizedHandler = null
 
@@ -18,6 +19,23 @@ export function clearAuthToken() {
 
 export function setUnauthorizedHandler(handler) {
   unauthorizedHandler = typeof handler === 'function' ? handler : null
+}
+
+export function hasPermission(user, permission) {
+  if (!permission) return true
+  if (!user || !Array.isArray(user.permissions)) return false
+  return user.permissions.includes(permission)
+}
+
+export function hasAnyPermission(user, permissions = []) {
+  if (!permissions.length) return true
+  return permissions.some((p) => hasPermission(user, p))
+}
+
+export function hasRole(user, roleName) {
+  if (!user) return false
+  if (Array.isArray(user.roles) && user.roles.includes(roleName)) return true
+  return user.role === roleName
 }
 
 function buildApiUrl(path) {
@@ -45,8 +63,17 @@ async function parseErrorBody(res) {
   }
 }
 
-// useApi fetches a GET endpoint with in-memory Bearer auth.
-// Returns { data, loading, error } and re-fetches when the path changes.
+function buildAuthHeaders(extraHeaders = {}, includeJson = false) {
+  const headers = {
+    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+    'X-Requested-With': 'XMLHttpRequest',
+    ...extraHeaders,
+  }
+  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
+  return headers
+}
+
+// useApi fetches a GET endpoint using in-memory Bearer auth or HttpOnly session cookie.
 export function useApi(path) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -55,11 +82,12 @@ export function useApi(path) {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setError(null)
 
-    const headers = {}
-    if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
-
-    fetch(buildApiUrl(path), { headers })
+    fetch(buildApiUrl(path), {
+      headers: buildAuthHeaders(),
+      credentials: 'same-origin',
+    })
       .then(async (res) => {
         if (!res.ok) {
           const serverErr = await parseErrorBody(res)
@@ -79,23 +107,32 @@ export function useApi(path) {
 }
 
 export async function apiFetch(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers }
-  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
+  const headers = buildAuthHeaders(options.headers, true)
 
-  const res = await fetch(buildApiUrl(path), { ...options, headers })
+  const res = await fetch(buildApiUrl(path), {
+    credentials: 'same-origin',
+    ...options,
+    headers,
+  })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     notifyIfSessionInvalid(res.status, data?.error)
-    throw new Error(data.error || 'HTTP ' + res.status)
+    const err = new Error(data.error || 'HTTP ' + res.status)
+    err.status = res.status
+    err.requiredPermission = data.requiredPermission
+    throw err
   }
   return data
 }
 
 export async function apiFetchBlob(path, options = {}) {
-  const headers = { ...options.headers }
-  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
+  const headers = buildAuthHeaders(options.headers, false)
 
-  const res = await fetch(buildApiUrl(path), { ...options, headers })
+  const res = await fetch(buildApiUrl(path), {
+    credentials: 'same-origin',
+    ...options,
+    headers,
+  })
   if (!res.ok) {
     const serverErr = await parseErrorBody(res)
     notifyIfSessionInvalid(res.status, serverErr)
@@ -105,10 +142,13 @@ export async function apiFetchBlob(path, options = {}) {
 }
 
 export async function apiFetchText(path, options = {}) {
-  const headers = { ...options.headers }
-  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
+  const headers = buildAuthHeaders(options.headers, false)
 
-  const res = await fetch(buildApiUrl(path), { ...options, headers })
+  const res = await fetch(buildApiUrl(path), {
+    credentials: 'same-origin',
+    ...options,
+    headers,
+  })
   if (!res.ok) {
     const serverErr = await parseErrorBody(res)
     notifyIfSessionInvalid(res.status, serverErr)
@@ -118,10 +158,10 @@ export async function apiFetchText(path, options = {}) {
 }
 
 export async function apiPostFormData(path, formData, options = {}) {
-  const headers = { ...options.headers }
-  if (memoryToken) headers['Authorization'] = 'Bearer ' + memoryToken
+  const headers = buildAuthHeaders(options.headers, false)
 
   const res = await fetch(buildApiUrl(path), {
+    credentials: 'same-origin',
     ...options,
     method: 'POST',
     headers,
@@ -136,13 +176,32 @@ export async function apiPostFormData(path, formData, options = {}) {
 }
 
 export async function apiPost(path, body) {
-  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) })
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body ?? {}) })
 }
 
 export async function apiPut(path, body) {
-  return apiFetch(path, { method: 'PUT', body: JSON.stringify(body) })
+  return apiFetch(path, { method: 'PUT', body: JSON.stringify(body ?? {}) })
+}
+
+export async function apiPatch(path, body) {
+  return apiFetch(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) })
 }
 
 export async function apiDelete(path) {
   return apiFetch(path, { method: 'DELETE' })
+}
+
+export async function logoutSession() {
+  try {
+    await fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: buildAuthHeaders({}, true),
+      credentials: 'same-origin',
+      body: '{}',
+    })
+  } catch {
+    // ignore network error during sign-out cleanup
+  } finally {
+    clearAuthToken()
+  }
 }

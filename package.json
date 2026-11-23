@@ -7,6 +7,9 @@
     "type": "git",
     "url": "https://github.com/Kathal-OS/Kathal.git"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "workspaces": [
     "web"
   ],
@@ -15,7 +18,8 @@
     "build": "vite build --config web/vite.config.js && tsc --noEmit",
     "start": "node server.ts",
     "desktop": "electron electron/main.cjs",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

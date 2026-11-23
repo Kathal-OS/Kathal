@@ -5,8 +5,6 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import express, { type Request, type Response, type NextFunction } from 'express'
-import jwt from 'jsonwebtoken'
-import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MemoryStore } from './src/store.ts'
@@ -14,7 +12,6 @@ import {
   loadCentralRegistry,
   reloadCentralRegistry,
   getRegistryAppById,
-  getRegistryApplications,
   getTemplateById,
 } from './src/templates.ts'
 import {
@@ -34,18 +31,48 @@ import { collectSystemMonitorData } from './src/systemMonitor.ts'
 import { getDataDir, getPlatformLabel, getSystemDiskMount } from './src/platform.ts'
 import { UpdateChecker, resolveCurrentEnvVersion } from './src/updateChecker.ts'
 import { BackupManager } from './src/backupManager.ts'
+import { getRuntimeConfig } from './src/config/runtimeConfig.ts'
+import { DatabaseManager } from './src/database/sqlite.ts'
+import { migrateLegacyJsonToSqlite, type JsonMigrationSummary } from './src/database/jsonMigrator.ts'
+import { VaultManager } from './src/security/vault.ts'
+import { AuditService } from './src/audit/auditService.ts'
+import { RbacService } from './src/auth/rbac.ts'
+import { AuthService } from './src/auth/authService.ts'
+import { PlatformRepository } from './src/repositories/platformRepository.ts'
+import { FleetService } from './src/fleet/fleetService.ts'
+import { TerminalGateway } from './src/websocket/terminalGateway.ts'
+import { safeEqualStrings } from './src/security/password.ts'
+import {
+  createAuthMiddleware,
+  requestContextMiddleware,
+  requirePermission,
+  type AuthedRequest,
+} from './src/middleware/authMiddleware.ts'
+import { createAuthRouter } from './src/routes/authRoutes.ts'
+import { createUserRouter } from './src/routes/userRoutes.ts'
+import { createVaultRouter } from './src/routes/vaultRoutes.ts'
+import { createDatabaseAdminRouter } from './src/routes/databaseAdminRoutes.ts'
+import { createFleetRouter } from './src/routes/fleetRoutes.ts'
+import { createAuditRouter } from './src/routes/auditRoutes.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = Number(process.env.PORT) || 3000
-const VERSION = resolveCurrentEnvVersion().version || process.env.KATHAL_VERSION || '0.1.0'
-const ADMIN_EMAIL = (process.env.KATHAL_ADMIN_EMAIL || 'admin@kathal.local').toLowerCase()
-const CONFIGURED_ADMIN_PASSWORD = (process.env.KATHAL_ADMIN_PASSWORD || '').trim()
-const CONFIGURED_ADMIN_HASH = CONFIGURED_ADMIN_PASSWORD
-  ? bcrypt.hashSync(CONFIGURED_ADMIN_PASSWORD, 10)
-  : null
-const JWT_SECRET = process.env.KATHAL_JWT_SECRET || crypto.randomBytes(32).toString('hex')
+const runtimeConfig = getRuntimeConfig()
+const PORT = runtimeConfig.port
+const VERSION = resolveCurrentEnvVersion().version || runtimeConfig.version
 
-let claimedAdmin: { email: string; passwordHash: string } | null = null
+const dbManager = new DatabaseManager()
+const db = dbManager.initialize()
+const vault = new VaultManager()
+vault.initialize(db)
+const auditService = new AuditService(db)
+const rbacService = new RbacService(db)
+rbacService.seedDefaults()
+const authService = new AuthService(db, rbacService)
+const platformRepo = new PlatformRepository(db, vault)
+const fleetService = new FleetService(db)
+
+let lastJsonMigrationSummary: JsonMigrationSummary | null = null
+let platformBootstrapped = false
 
 const store = new MemoryStore()
 const proxyConfig = new ProxyConfigManager()
@@ -66,6 +93,24 @@ if (loadedProxyConfig) {
   store.settings.forceHttps = loadedProxyConfig.settings.forceHttps
 } else {
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+}
+
+function savePlatformState() {
+  try {
+    platformRepo.syncFromStore(store)
+  } catch (err) {
+    console.error('[kathal] Failed to persist platform state to SQLite:', (err as Error).message)
+  }
+}
+
+async function bootstrapPlatform() {
+  if (platformBootstrapped) return
+  lastJsonMigrationSummary = await migrateLegacyJsonToSqlite(dbManager, vault)
+  await authService.ensureConfiguredEnvOwner()
+  fleetService.ensureLocalPrimaryNode()
+  platformRepo.loadIntoStore(store)
+  proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  platformBootstrapped = true
 }
 
 const localRuntime = new LocalRuntimeManager()
@@ -116,51 +161,29 @@ const monitoringTimer = setInterval(() => {
 }, 1000)
 monitoringTimer.unref()
 
-// Login rate limiter
-const loginAttempts = new Map<string, { failures: number; lastFail: number }>()
-const MAX_LOGIN_FAILURES = 5
-const LOGIN_LOCKOUT_MS = 5 * 60 * 1000
-
-function canAttemptLogin(email: string): boolean {
-  const entry = loginAttempts.get(email)
-  if (!entry) return true
-  if (Date.now() - entry.lastFail >= LOGIN_LOCKOUT_MS) {
-    loginAttempts.delete(email)
-    return true
-  }
-  return entry.failures < MAX_LOGIN_FAILURES
-}
-
-function recordLoginFailure(email: string) {
-  const entry = loginAttempts.get(email) || { failures: 0, lastFail: 0 }
-  entry.failures += 1
-  entry.lastFail = Date.now()
-  loginAttempts.set(email, entry)
-}
-
-interface AuthRequest extends Request {
-  user?: { id: string; email: string; role: string }
-}
-
-const PUBLIC_API_PATHS = new Set(['/login', '/health', '/auth/status', '/auth/setup'])
-
-function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
-  if (PUBLIC_API_PATHS.has(req.path)) {
-    next()
-    return
-  }
-  const authHeader = req.headers.authorization || ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
-  if (!token) {
-    res.status(401).json({ error: 'unauthorized' })
-    return
-  }
+function recordAudit(
+  req: AuthedRequest | { auth?: AuthedRequest['auth']; user?: AuthedRequest['user']; ip?: string; requestId?: string; socket?: { remoteAddress?: string } } | null,
+  action: string,
+  target: string,
+  outcome: 'success' | 'denied' | 'error' = 'success',
+  detail?: string,
+  metadata?: Record<string, unknown>
+) {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: string }
-    req.user = decoded
-    next()
+    auditService.record({
+      userId: req?.auth?.user?.id || req?.user?.id || null,
+      actor: req?.auth?.user?.email || req?.user?.email || 'system',
+      action,
+      resourceId: target,
+      target,
+      outcome,
+      ip: req?.ip || req?.socket?.remoteAddress || '127.0.0.1',
+      correlationId: req?.requestId || '',
+      detail,
+      metadata,
+    })
   } catch {
-    res.status(401).json({ error: 'invalid token' })
+    // audit log failure must not break primary request flow
   }
 }
 
@@ -202,6 +225,9 @@ function proxyToLocalPort(req: Request, res: Response, targetPort: number, forwa
 }
 
 const app = express()
+
+// Request ID + Baseline HTTP security headers (iframe-safe for AI Studio & Electron)
+app.use(requestContextMiddleware)
 
 // Live Reverse Proxy Middleware MUST run BEFORE express.json() so request bodies stream cleanly
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -255,86 +281,57 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next()
 })
 
-app.use(express.json({ limit: '10mb' }))
+app.use(
+  express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => {
+      ;(req as AuthedRequest).rawBody = buf
+    },
+  })
+)
 
 const api = express.Router()
-api.use(authMiddleware)
+api.use(createAuthMiddleware(authService))
 
-// ==================== AUTH & HEALTH ====================
+// ==================== MODULAR PHASE 1.5 ROUTERS ====================
 
-api.get('/auth/status', (_req: Request, res: Response) => {
-  const needsSetup = !CONFIGURED_ADMIN_HASH && !claimedAdmin
-  res.json({
-    needsSetup,
-    adminEmail: CONFIGURED_ADMIN_HASH ? ADMIN_EMAIL : claimedAdmin?.email || ADMIN_EMAIL,
+api.use(
+  createAuthRouter({
+    authService,
+    audit: auditService,
+    onOwnerClaimed: (userId) => {
+      fleetService.ensureLocalPrimaryNode(userId)
+    },
   })
-})
-
-api.post('/auth/setup', async (req: Request, res: Response) => {
-  if (CONFIGURED_ADMIN_HASH || claimedAdmin) {
-    res.status(409).json({ error: 'Admin account is already configured. Please sign in.' })
-    return
-  }
-  const email = String(req.body?.email || '').trim().toLowerCase()
-  const password = String(req.body?.password || '')
-  if (!email || !email.includes('@')) {
-    res.status(400).json({ error: 'Please enter a valid email address.' })
-    return
-  }
-  if (password.length < 6 || password.length > 128) {
-    res.status(400).json({ error: 'Password must be between 6 and 128 characters.' })
-    return
-  }
-  const passwordHash = await bcrypt.hash(password, 10)
-  // Double-check after async hash to ensure one-time atomic claim
-  if (CONFIGURED_ADMIN_HASH || claimedAdmin) {
-    res.status(409).json({ error: 'Admin account is already configured. Please sign in.' })
-    return
-  }
-  claimedAdmin = { email, passwordHash }
-  const user = { id: 'admin', email, role: 'admin' }
-  const token = jwt.sign(user, JWT_SECRET, { expiresIn: '72h' })
-  res.json({ token, user })
-})
-
-api.get('/auth/session', (req: AuthRequest, res: Response) => {
-  res.json({ user: req.user })
-})
-
-api.post('/login', async (req: Request, res: Response) => {
-  const email = String(req.body?.email || '').trim().toLowerCase()
-  const password = String(req.body?.password || '')
-  if (!email || !password) {
-    res.status(400).json({ error: 'email and password are required' })
-    return
-  }
-  if (!CONFIGURED_ADMIN_HASH && !claimedAdmin) {
-    res.status(403).json({
-      error: 'Admin account has not been set up yet. Complete first-time setup first.',
-      needsSetup: true,
-    })
-    return
-  }
-  if (!canAttemptLogin(email)) {
-    res.status(429).json({ error: 'too many failed attempts, try again later' })
-    return
-  }
-  const expectedEmail = CONFIGURED_ADMIN_HASH ? ADMIN_EMAIL : claimedAdmin!.email
-  const expectedHash = CONFIGURED_ADMIN_HASH || claimedAdmin!.passwordHash
-  const valid = email === expectedEmail && (await bcrypt.compare(password, expectedHash))
-  if (!valid) {
-    recordLoginFailure(email)
-    res.status(401).json({ error: 'invalid credentials' })
-    return
-  }
-  loginAttempts.delete(email)
-  const user = { id: 'admin', email: expectedEmail, role: 'admin' }
-  const token = jwt.sign(user, JWT_SECRET, { expiresIn: '72h' })
-  res.json({ token, user })
-})
+)
+api.use(createUserRouter({ authService, rbac: rbacService, audit: auditService }))
+api.use(createVaultRouter({ db, vault, platformRepo, store, audit: auditService }))
+api.use(
+  createDatabaseAdminRouter({
+    dbManager,
+    getJsonMigrationSummary: () => lastJsonMigrationSummary,
+    audit: auditService,
+  })
+)
+api.use(
+  createFleetRouter({
+    fleetService,
+    audit: auditService,
+    store,
+    getVersion: () => VERSION,
+    getRunningAppsCount: () => listAllSerializedWorkload().filter((w) => w.state === 'running').length,
+  })
+)
+api.use(createAuditRouter({ audit: auditService }))
 
 api.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok' })
+  const integrity = dbManager.integrityCheck()
+  res.json({
+    status: 'ok',
+    database: integrity.ok ? 'ok' : 'degraded',
+    vault: vault.isLocked() ? 'locked' : 'ready',
+    version: VERSION,
+  })
 })
 
 // ==================== HELPER FUNCTIONS FOR LOCAL APPS ====================
@@ -466,7 +463,7 @@ function getAllRunningForMetrics() {
 
 // ==================== SYSTEM ====================
 
-api.get('/status', (_req: Request, res: Response) => {
+api.get('/status', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   const all = listAllSerializedWorkload()
   const runningApps = all.filter((a) => a.state === 'running').length
   res.json({
@@ -503,7 +500,7 @@ api.get('/status', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/platform/installers', (_req: Request, res: Response) => {
+api.get('/platform/installers', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   res.json({
     selfHosted: true,
     cloudRequired: false,
@@ -544,7 +541,7 @@ api.get('/platform/installers', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/desktop/info', (_req: Request, res: Response) => {
+api.get('/desktop/info', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   res.json({
     platform: os.platform(),
     platformLabel: getPlatformLabel(),
@@ -562,7 +559,7 @@ api.get('/desktop/info', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/metrics', (_req: Request, res: Response) => {
+api.get('/metrics', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   const sys = store.collectSystemMetrics()
   const all = listAllSerializedWorkload()
   const running = all.filter((a) => a.state === 'running').length
@@ -579,7 +576,7 @@ api.get('/metrics', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/system', (_req: Request, res: Response) => {
+api.get('/system', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   res.json({
     version: VERSION,
     platform: os.platform(),
@@ -597,7 +594,7 @@ api.get('/system', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/system/monitor', (_req: Request, res: Response) => {
+api.get('/system/monitor', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   res.json(collectSystemMonitorData())
 })
 
@@ -618,16 +615,25 @@ async function handleCheckUpdates(req: Request, res: Response) {
   res.json(report)
 }
 
-api.get('/system/updates', handleCheckUpdates)
-api.post('/system/check-updates', handleCheckUpdates)
+api.get('/system/updates', requirePermission('dashboard.read', auditService), handleCheckUpdates)
+api.post('/system/check-updates', requirePermission('dashboard.read', auditService), handleCheckUpdates)
 
 // ==================== OPERATIONAL SETTINGS ====================
 
-api.get('/settings', (_req: Request, res: Response) => {
-  res.json(store.settings)
+function serializeSettings() {
+  const { webhookSecret, ...rest } = store.settings
+  return {
+    ...rest,
+    hasWebhookSecret: Boolean(webhookSecret),
+    webhookSecretMasked: webhookSecret ? '••••••••' : '',
+  }
+}
+
+api.get('/settings', requirePermission('settings.read', auditService), (_req: Request, res: Response) => {
+  res.json(serializeSettings())
 })
 
-api.put('/settings', (req: Request, res: Response) => {
+api.put('/settings', requirePermission('settings.manage', auditService), (req: AuthedRequest, res: Response) => {
   const b = req.body || {}
   if (typeof b.serverName === 'string') store.settings.serverName = b.serverName.trim() || store.settings.serverName
   if (typeof b.serverDomain === 'string') store.settings.serverDomain = b.serverDomain.trim()
@@ -649,18 +655,29 @@ api.put('/settings', (req: Request, res: Response) => {
     if (Number.isFinite(val)) store.settings.memoryAlertThreshold = Math.min(100, Math.max(10, val))
   }
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
-  res.json(store.settings)
+  savePlatformState()
+  recordAudit(req, 'settings.update', 'platform-settings', 'success')
+  res.json(serializeSettings())
 })
 
-api.post('/settings/regenerate-webhook', (_req: Request, res: Response) => {
-  store.settings.webhookSecret = crypto.randomBytes(16).toString('hex')
+api.post('/settings/reveal-webhook', requirePermission('secrets.reveal', auditService), (req: AuthedRequest, res: Response) => {
+  recordAudit(req, 'settings.reveal_webhook', 'webhookSecret', 'success')
   res.json({ webhookSecret: store.settings.webhookSecret })
 })
 
-api.post('/settings/reset', (_req: Request, res: Response) => {
+api.post('/settings/regenerate-webhook', requirePermission('secrets.reveal', auditService), (req: AuthedRequest, res: Response) => {
+  store.settings.webhookSecret = crypto.randomBytes(16).toString('hex')
+  savePlatformState()
+  recordAudit(req, 'settings.rotate_webhook', 'webhookSecret', 'success')
+  res.json({ webhookSecret: store.settings.webhookSecret })
+})
+
+api.post('/settings/reset', requirePermission('settings.manage', auditService), (req: AuthedRequest, res: Response) => {
   store.resetToDefaults()
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
-  res.json({ status: 'reset', settings: store.settings })
+  savePlatformState()
+  recordAudit(req, 'settings.reset', 'platform-state', 'success')
+  res.json({ status: 'reset', settings: serializeSettings() })
 })
 
 // ==================== UNIFIED LOCAL APP DEPLOY ====================
@@ -784,15 +801,15 @@ async function handleDeployLocalRequest(req: Request, res: Response) {
   }
 }
 
-api.post('/deploy', handleDeployLocalRequest)
+api.post('/deploy', requirePermission('applications.deploy', auditService), handleDeployLocalRequest)
 
 // ==================== NATIVE PROCESS MANAGEMENT (BINARY COMMANDS) ====================
 
-api.get('/processes', (_req: Request, res: Response) => {
+api.get('/processes', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(nativeProcesses.listProcesses().map(serializeNativeProcess))
 })
 
-api.post('/processes', async (req: Request, res: Response) => {
+api.post('/processes', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim()
   const executable = String(req.body?.executable || '').trim()
   if (!name) {
@@ -835,7 +852,7 @@ api.post('/processes', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/processes/:id/start', async (req: Request, res: Response) => {
+api.post('/processes/:id/start', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   try {
     const proc = await nativeProcesses.startProcess(String(req.params.id))
     if (!proc) {
@@ -848,7 +865,7 @@ api.post('/processes/:id/start', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/processes/:id/stop', async (req: Request, res: Response) => {
+api.post('/processes/:id/stop', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const proc = await nativeProcesses.stopProcess(String(req.params.id))
   if (!proc) {
     res.status(404).json({ error: 'process not found' })
@@ -857,7 +874,7 @@ api.post('/processes/:id/stop', async (req: Request, res: Response) => {
   res.json({ status: 'stopped', process: serializeNativeProcess(proc) })
 })
 
-api.post('/processes/:id/restart', async (req: Request, res: Response) => {
+api.post('/processes/:id/restart', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   try {
     const proc = await nativeProcesses.restartProcess(String(req.params.id))
     if (!proc) {
@@ -870,17 +887,17 @@ api.post('/processes/:id/restart', async (req: Request, res: Response) => {
   }
 })
 
-api.get('/processes/:id/logs', (req: Request, res: Response) => {
+api.get('/processes/:id/logs', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const lines = nativeProcesses.getLogs(String(req.params.id), 200)
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
 
-api.post('/processes/:id/probe', async (req: Request, res: Response) => {
+api.post('/processes/:id/probe', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const result = await nativeProcesses.probeProcess(String(req.params.id))
   res.json(result)
 })
 
-api.get('/native-processes', (req: Request, res: Response) => {
+api.get('/native-processes', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const runningOnly = req.query.running !== 'false'
   const sourceFilter = String(req.query.source || 'all')
   const all = listAllSerializedWorkload()
@@ -920,7 +937,7 @@ api.get('/native-processes', (req: Request, res: Response) => {
   })
 })
 
-api.delete('/processes/:id', async (req: Request, res: Response) => {
+api.delete('/processes/:id', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const proc = nativeProcesses.processes.get(String(req.params.id))
   if (!proc) {
     res.status(404).json({ error: 'process not found' })
@@ -935,14 +952,14 @@ api.delete('/processes/:id', async (req: Request, res: Response) => {
 
 // ==================== RUNNING LOCAL APPS & PROCESSES ====================
 
-api.get('/containers', (req: Request, res: Response) => {
+api.get('/containers', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const showAll = req.query.all === 'true'
   const all = listAllSerializedWorkload()
   const filtered = showAll ? all : all.filter((a) => a.state === 'running')
   res.json(filtered)
 })
 
-api.post('/containers/prune', async (_req: Request, res: Response) => {
+api.post('/containers/prune', requirePermission('containers.manage', auditService), async (_req: Request, res: Response) => {
   const stoppedApps = localRuntime.listApps().filter((a) => a.state !== 'running')
   const stoppedBins = nativeProcesses.listProcesses().filter((p) => p.state !== 'running')
   const deletedNames: string[] = []
@@ -964,7 +981,7 @@ api.post('/containers/prune', async (_req: Request, res: Response) => {
   })
 })
 
-api.post('/containers/:id/start', async (req: Request, res: Response) => {
+api.post('/containers/:id/start', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appItem = await localRuntime.startApp(id)
   if (appItem) {
@@ -994,7 +1011,7 @@ api.post('/containers/:id/start', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'app not found' })
 })
 
-api.post('/containers/:id/stop', async (req: Request, res: Response) => {
+api.post('/containers/:id/stop', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appItem = await localRuntime.stopApp(id)
   if (appItem) {
@@ -1019,7 +1036,7 @@ api.post('/containers/:id/stop', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'app not found' })
 })
 
-api.post('/containers/:id/pause', async (req: Request, res: Response) => {
+api.post('/containers/:id/pause', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appItem = await localRuntime.stopApp(id)
   if (appItem) {
@@ -1044,7 +1061,7 @@ api.post('/containers/:id/pause', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'app not found' })
 })
 
-api.post('/containers/:id/restart', async (req: Request, res: Response) => {
+api.post('/containers/:id/restart', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appItem = await localRuntime.restartApp(id)
   if (appItem) {
@@ -1074,7 +1091,7 @@ api.post('/containers/:id/restart', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'app not found' })
 })
 
-api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
+api.delete('/containers/:id/delete', requirePermission('applications.delete', auditService), async (req: AuthedRequest, res: Response) => {
   const id = String(req.params.id)
   const existing = localRuntime.apps.get(id)
   if (existing) {
@@ -1082,6 +1099,7 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     await localRuntime.deleteApp(existing.id)
     store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
     proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    recordAudit(req, 'container.delete', id, 'success')
     res.json({ status: 'deleted' })
     return
   }
@@ -1091,6 +1109,7 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     await installerEngine.uninstall(existingInst.id)
     store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
     proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    recordAudit(req, 'container.delete', id, 'success')
     res.json({ status: 'deleted' })
     return
   }
@@ -1100,6 +1119,7 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     await nativeProcesses.deleteProcess(existingBin.id)
     store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
     proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    recordAudit(req, 'container.delete', id, 'success')
     res.json({ status: 'deleted' })
     return
   }
@@ -1109,13 +1129,14 @@ api.delete('/containers/:id/delete', async (req: Request, res: Response) => {
     await serviceEngine.deleteService(existingSvc.id)
     store.proxyRoutes = store.proxyRoutes.filter((r) => r.target !== `http://127.0.0.1:${oldPort}` && r.target !== `http://localhost:${oldPort}`)
     proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    recordAudit(req, 'container.delete', id, 'success')
     res.json({ status: 'deleted' })
     return
   }
   res.status(404).json({ error: 'app not found' })
 })
 
-api.get('/containers/:id/logs', (req: Request, res: Response) => {
+api.get('/containers/:id/logs', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const id = String(req.params.id)
   const appLines = localRuntime.getAppLogs(id, 150)
   const inst = installerEngine.installations.get(id) || installerEngine.findByName(id)
@@ -1131,9 +1152,9 @@ api.get('/containers/:id/logs', (req: Request, res: Response) => {
   res.json({ logs: lines.map((l) => `${l.timestamp} ${l.content}`).join('\n') })
 })
 
-api.post('/containers', handleDeployLocalRequest)
+api.post('/containers', requirePermission('applications.deploy', auditService), handleDeployLocalRequest)
 
-api.post('/apps/:id/domain', (req: Request, res: Response) => {
+api.post('/apps/:id/domain', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const key = String(req.params.id)
   const targetApp = localRuntime.apps.get(key) || localRuntime.findByName(key)
   const targetBin = nativeProcesses.getProcess(key)
@@ -1170,7 +1191,7 @@ function getImageUsage(img: (typeof store.images)[number]) {
   return { inUse: usedBy.length > 0, containers: usedBy }
 }
 
-api.get('/images', (_req: Request, res: Response) => {
+api.get('/images', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(
     store.images.map((img) => ({
       ...img,
@@ -1197,7 +1218,7 @@ function extractImageRegistryHost(imageRef: string): string | null {
   return null
 }
 
-api.post('/images/pull', (req: Request, res: Response) => {
+api.post('/images/pull', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   let imageTag = String(req.body?.image || '').trim()
   const registryId = String(req.body?.registryId || '').trim()
   if (!imageTag) {
@@ -1243,7 +1264,7 @@ api.post('/images/pull', (req: Request, res: Response) => {
   })
 })
 
-api.post('/images/prune', (_req: Request, res: Response) => {
+api.post('/images/prune', requirePermission('containers.manage', auditService), (_req: Request, res: Response) => {
   const unused = store.images.filter((img) => !getImageUsage(img).inUse)
   const reclaimed = unused.reduce((sum, img) => sum + (img.size || 0), 0)
   const deletedTags = unused.flatMap((img) => img.repoTags || [])
@@ -1255,7 +1276,7 @@ api.post('/images/prune', (_req: Request, res: Response) => {
   })
 })
 
-api.delete('/images/:id', (req: Request, res: Response) => {
+api.delete('/images/:id', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const id = decodeURIComponent(String(req.params.id))
   const idx = store.images.findIndex((i) => i.id === id)
   if (idx === -1) {
@@ -1275,11 +1296,11 @@ api.delete('/images/:id', (req: Request, res: Response) => {
 
 // ==================== APPS ====================
 
-api.get('/apps', (_req: Request, res: Response) => {
+api.get('/apps', requirePermission('applications.read', auditService), (_req: Request, res: Response) => {
   res.json(Array.from(store.apps.values()))
 })
 
-api.post('/apps', (req: Request, res: Response) => {
+api.post('/apps', requirePermission('applications.create', auditService), (req: Request, res: Response) => {
   const id = req.body?.id || store.newId('app')
   const appRecord = {
     id,
@@ -1293,7 +1314,7 @@ api.post('/apps', (req: Request, res: Response) => {
   res.json(appRecord)
 })
 
-api.get('/apps/:id', (req: Request, res: Response) => {
+api.get('/apps/:id', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const item = store.apps.get(String(req.params.id))
   if (!item) {
     res.status(404).json({ error: 'app not found' })
@@ -1302,7 +1323,7 @@ api.get('/apps/:id', (req: Request, res: Response) => {
   res.json(item)
 })
 
-api.put('/apps/:id', (req: Request, res: Response) => {
+api.put('/apps/:id', requirePermission('applications.deploy', auditService), (req: Request, res: Response) => {
   const id = String(req.params.id)
   const existing = store.apps.get(id)
   if (!existing) {
@@ -1314,14 +1335,14 @@ api.put('/apps/:id', (req: Request, res: Response) => {
   res.json(updated)
 })
 
-api.delete('/apps/:id', (req: Request, res: Response) => {
+api.delete('/apps/:id', requirePermission('applications.delete', auditService), (req: Request, res: Response) => {
   store.apps.delete(String(req.params.id))
   res.json({ status: 'deleted' })
 })
 
 // ==================== REVERSE PROXY & CUSTOM DOMAINS ====================
 
-api.get('/proxy/config', (_req: Request, res: Response) => {
+api.get('/proxy/config', requirePermission('settings.read', auditService), (_req: Request, res: Response) => {
   const rawJson = proxyConfig.readRawJson(store.proxyRoutes, store.settings)
   const loaded = proxyConfig.loadFromDisk()
   res.json({
@@ -1334,7 +1355,7 @@ api.get('/proxy/config', (_req: Request, res: Response) => {
   })
 })
 
-api.put('/proxy/config', (req: Request, res: Response) => {
+api.put('/proxy/config', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const incomingRoutes = req.body?.routes
   if (Array.isArray(incomingRoutes)) {
     const validated: typeof store.proxyRoutes = []
@@ -1388,7 +1409,7 @@ api.put('/proxy/config', (req: Request, res: Response) => {
   })
 })
 
-api.get('/proxy', (_req: Request, res: Response) => {
+api.get('/proxy', requirePermission('settings.read', auditService), (_req: Request, res: Response) => {
   const allWorkloads = listAllSerializedWorkload()
   const enriched = store.proxyRoutes.map((route) => {
     const check = validateLocalProxyTarget(route.target)
@@ -1407,7 +1428,7 @@ api.get('/proxy', (_req: Request, res: Response) => {
   res.json(enriched)
 })
 
-api.post('/proxy', (req: Request, res: Response) => {
+api.post('/proxy', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const domain = String(req.body?.domain || '').trim().toLowerCase()
   const appName = String(req.body?.appName || '').trim()
   const rawHost = String(req.body?.targetHost || 'localhost').trim().toLowerCase()
@@ -1457,6 +1478,7 @@ api.post('/proxy', (req: Request, res: Response) => {
     existing.ssl = Boolean(req.body?.ssl)
     existing.enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : true
     const saved = proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+    savePlatformState()
     res.json({ ...existing, savedToJson: true, configUpdatedAt: saved.updatedAt })
     return
   }
@@ -1471,10 +1493,11 @@ api.post('/proxy', (req: Request, res: Response) => {
   }
   store.proxyRoutes.push(route)
   const saved = proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  savePlatformState()
   res.json({ ...route, savedToJson: true, configUpdatedAt: saved.updatedAt })
 })
 
-api.get('/proxy/:id', (req: Request, res: Response) => {
+api.get('/proxy/:id', requirePermission('settings.read', auditService), (req: Request, res: Response) => {
   const route = store.proxyRoutes.find((r) => r.id === req.params.id)
   if (!route) {
     res.status(404).json({ error: 'route not found' })
@@ -1483,7 +1506,7 @@ api.get('/proxy/:id', (req: Request, res: Response) => {
   res.json(route)
 })
 
-api.put('/proxy/:id', (req: Request, res: Response) => {
+api.put('/proxy/:id', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const idx = store.proxyRoutes.findIndex((r) => r.id === req.params.id)
   if (idx === -1) {
     res.status(404).json({ error: 'route not found' })
@@ -1533,10 +1556,11 @@ api.put('/proxy/:id', (req: Request, res: Response) => {
     id: String(req.params.id),
   }
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  savePlatformState()
   res.json(store.proxyRoutes[idx])
 })
 
-api.delete('/proxy/:id', (req: Request, res: Response) => {
+api.delete('/proxy/:id', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const idx = store.proxyRoutes.findIndex((r) => r.id === req.params.id)
   if (idx === -1) {
     res.status(404).json({ error: 'route not found' })
@@ -1544,10 +1568,11 @@ api.delete('/proxy/:id', (req: Request, res: Response) => {
   }
   store.proxyRoutes.splice(idx, 1)
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
-api.post('/proxy/:id/test', async (req: Request, res: Response) => {
+api.post('/proxy/:id/test', requirePermission('settings.manage', auditService), async (req: Request, res: Response) => {
   const route = store.proxyRoutes.find((r) => r.id === req.params.id)
   if (!route) {
     res.status(404).json({ error: 'route not found' })
@@ -1567,7 +1592,7 @@ api.post('/proxy/:id/test', async (req: Request, res: Response) => {
   })
 })
 
-api.post('/proxy/:id/enable', (req: Request, res: Response) => {
+api.post('/proxy/:id/enable', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const route = store.proxyRoutes.find((r) => r.id === req.params.id)
   if (!route) {
     res.status(404).json({ error: 'route not found' })
@@ -1575,10 +1600,11 @@ api.post('/proxy/:id/enable', (req: Request, res: Response) => {
   }
   route.enabled = true
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  savePlatformState()
   res.json({ status: 'enabled' })
 })
 
-api.post('/proxy/:id/disable', (req: Request, res: Response) => {
+api.post('/proxy/:id/disable', requirePermission('settings.manage', auditService), (req: Request, res: Response) => {
   const route = store.proxyRoutes.find((r) => r.id === req.params.id)
   if (!route) {
     res.status(404).json({ error: 'route not found' })
@@ -1586,6 +1612,7 @@ api.post('/proxy/:id/disable', (req: Request, res: Response) => {
   }
   route.enabled = false
   proxyConfig.saveToDisk(store.proxyRoutes, store.settings)
+  savePlatformState()
   res.json({ status: 'disabled' })
 })
 
@@ -1598,71 +1625,94 @@ const DB_DEFAULTS: Record<string, { port: number; user: string }> = {
   redis: { port: 6379, user: 'default' },
 }
 
-api.get('/databases', (_req: Request, res: Response) => {
-  res.json(store.databases)
+function serializeDatabase(db: (typeof store.databases)[number]) {
+  return {
+    id: db.id,
+    name: db.name,
+    type: db.type,
+    port: db.port,
+    user: db.user,
+    status: db.status,
+    hasPassword: Boolean(db.password),
+    passwordMasked: db.password ? '••••••••' : '',
+  }
+}
+
+api.get('/databases', requirePermission('databases.read', auditService), (_req: Request, res: Response) => {
+  res.json(store.databases.map(serializeDatabase))
 })
 
-api.post('/databases', (req: Request, res: Response) => {
+api.post('/databases', requirePermission('databases.manage', auditService), (req: AuthedRequest, res: Response) => {
   const name = String(req.body?.name || '').trim()
   const type = String(req.body?.type || 'postgres') as 'postgres' | 'mysql' | 'mongodb' | 'redis'
   if (!name) {
     res.status(400).json({ error: 'database name is required' })
     return
   }
-  const meta = DB_DEFAULTS[type] || DB_DEFAULTS.postgres
+  if (!DB_DEFAULTS[type]) {
+    res.status(400).json({ error: 'unsupported database type' })
+    return
+  }
+  const meta = DB_DEFAULTS[type]
   const db = {
     id: store.newId('db'),
     name,
     type,
     port: meta.port + store.databases.length,
     user: meta.user,
-    password: String(req.body?.password || '') || crypto.randomBytes(8).toString('hex'),
+    password: String(req.body?.password || '') || crypto.randomBytes(12).toString('hex'),
     status: 'running' as const,
   }
   store.databases.push(db)
-  res.json(db)
+  savePlatformState()
+  recordAudit(req, 'database.create', `${db.name} (${db.type})`, 'success')
+  res.json(serializeDatabase(db))
 })
 
-api.get('/databases/:id', (req: Request, res: Response) => {
+api.get('/databases/:id', requirePermission('databases.read', auditService), (req: Request, res: Response) => {
   const db = store.databases.find((d) => d.id === req.params.id)
   if (!db) {
     res.status(404).json({ error: 'database not found' })
     return
   }
-  res.json(db)
+  res.json(serializeDatabase(db))
 })
 
-api.delete('/databases/:id', (req: Request, res: Response) => {
+api.delete('/databases/:id', requirePermission('databases.manage', auditService), (req: AuthedRequest, res: Response) => {
   const idx = store.databases.findIndex((d) => d.id === req.params.id)
   if (idx === -1) {
     res.status(404).json({ error: 'database not found' })
     return
   }
-  store.databases.splice(idx, 1)
+  const [removed] = store.databases.splice(idx, 1)
+  savePlatformState()
+  recordAudit(req, 'database.delete', removed.name, 'success')
   res.json({ status: 'deleted' })
 })
 
-api.post('/databases/:id/start', (req: Request, res: Response) => {
+api.post('/databases/:id/start', requirePermission('databases.manage', auditService), (req: AuthedRequest, res: Response) => {
   const db = store.databases.find((d) => d.id === req.params.id)
   if (!db) {
     res.status(404).json({ error: 'database not found' })
     return
   }
   db.status = 'running'
+  savePlatformState()
   res.json({ status: 'started' })
 })
 
-api.post('/databases/:id/stop', (req: Request, res: Response) => {
+api.post('/databases/:id/stop', requirePermission('databases.manage', auditService), (req: AuthedRequest, res: Response) => {
   const db = store.databases.find((d) => d.id === req.params.id)
   if (!db) {
     res.status(404).json({ error: 'database not found' })
     return
   }
   db.status = 'stopped'
+  savePlatformState()
   res.json({ status: 'stopped' })
 })
 
-api.get('/databases/:id/connection', (req: Request, res: Response) => {
+api.get('/databases/:id/connection', requirePermission('databases.manage', auditService), (req: AuthedRequest, res: Response) => {
   const db = store.databases.find((d) => d.id === req.params.id)
   if (!db) {
     res.status(404).json({ error: 'database not found' })
@@ -1673,17 +1723,18 @@ api.get('/databases/:id/connection', (req: Request, res: Response) => {
   else if (db.type === 'mysql') conn = `mysql://${db.user}:${db.password}@localhost:${db.port}/${db.name}`
   else if (db.type === 'mongodb') conn = `mongodb://${db.user}:${db.password}@localhost:${db.port}/${db.name}`
   else conn = `redis://:${db.password}@localhost:${db.port}`
+  recordAudit(req, 'database.reveal_connection', db.name, 'success')
   res.json({ connection_string: conn })
 })
 
 // ==================== FILE MANAGER ====================
 
-api.get('/files', (req: Request, res: Response) => {
+api.get('/files', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const dirPath = String(req.query.path || '/')
   res.json(store.listDir(dirPath))
 })
 
-api.get('/files/read', (req: Request, res: Response) => {
+api.get('/files/read', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const filePath = store.normalizePath(String(req.query.path || ''))
   const node = store.files.get(filePath)
   if (!node || node.isDir) {
@@ -1694,7 +1745,7 @@ api.get('/files/read', (req: Request, res: Response) => {
   res.send(node.content)
 })
 
-api.post('/files/write', (req: Request, res: Response) => {
+api.post('/files/write', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const filePath = store.normalizePath(String(req.body?.path || ''))
   if (!filePath || filePath === '/') {
     res.status(400).json({ error: 'invalid file path' })
@@ -1709,7 +1760,7 @@ api.post('/files/write', (req: Request, res: Response) => {
   res.json({ status: 'ok' })
 })
 
-api.post('/files/mkdir', (req: Request, res: Response) => {
+api.post('/files/mkdir', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const dirPath = store.normalizePath(String(req.body?.path || ''))
   if (!dirPath || dirPath === '/') {
     res.status(400).json({ error: 'invalid directory path' })
@@ -1724,7 +1775,7 @@ api.post('/files/mkdir', (req: Request, res: Response) => {
   res.json({ status: 'ok' })
 })
 
-api.delete('/files/delete', (req: Request, res: Response) => {
+api.delete('/files/delete', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const target = store.normalizePath(String(req.query.path || ''))
   if (!target || target === '/') {
     res.status(400).json({ error: 'cannot delete root' })
@@ -1740,7 +1791,7 @@ api.delete('/files/delete', (req: Request, res: Response) => {
   res.json({ status: 'deleted' })
 })
 
-api.post('/files/rename', (req: Request, res: Response) => {
+api.post('/files/rename', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const oldPath = store.normalizePath(String(req.body?.old_path || ''))
   const newPath = store.normalizePath(String(req.body?.new_path || ''))
   const node = store.files.get(oldPath)
@@ -1754,7 +1805,7 @@ api.post('/files/rename', (req: Request, res: Response) => {
   res.json({ status: 'ok' })
 })
 
-api.post('/files/upload', upload.single('file'), (req: Request, res: Response) => {
+api.post('/files/upload', requirePermission('containers.manage', auditService), upload.single('file'), (req: Request, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: 'no file provided' })
     return
@@ -1772,23 +1823,26 @@ api.post('/files/upload', upload.single('file'), (req: Request, res: Response) =
 
 // ==================== BACKUPS ====================
 
-api.get('/backups', (_req: Request, res: Response) => {
+api.get('/backups', requirePermission('backups.create', auditService), (_req: Request, res: Response) => {
   res.json(backupManager.listBackups())
 })
 
-api.post('/backups', (req: Request, res: Response) => {
+api.post('/backups', requirePermission('backups.create', auditService), (req: AuthedRequest, res: Response) => {
   try {
     const rawName = typeof req.body?.name === 'string' ? req.body.name : ''
     const bkp = backupManager.createSnapshot(rawName)
+    savePlatformState()
+    recordAudit(req, 'backup.create', bkp.id, 'success', bkp.name)
     res.json(bkp)
   } catch (err) {
     res.status(500).json({ error: (err as Error).message || 'Failed to create backup archive' })
   }
 })
 
-api.get('/backups/export', (_req: Request, res: Response) => {
+api.get('/backups/export', requirePermission('backups.create', auditService), (req: AuthedRequest, res: Response) => {
   try {
     const archive = backupManager.exportZipArchive()
+    recordAudit(req, 'backup.export', archive.filename, 'success')
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="${archive.filename}"`)
     res.setHeader('Content-Length', String(archive.buffer.length))
@@ -1800,20 +1854,22 @@ api.get('/backups/export', (_req: Request, res: Response) => {
   }
 })
 
-api.post('/backups/import', upload.single('file'), (req: Request, res: Response) => {
+api.post('/backups/import', requirePermission('backups.restore', auditService), upload.single('file'), (req: AuthedRequest, res: Response) => {
   if (!req.file) {
     res.status(400).json({ error: 'no file provided' })
     return
   }
   try {
     const summary = backupManager.importArchive(req.file.buffer)
+    savePlatformState()
+    recordAudit(req, 'backup.import', req.file.originalname || 'archive', 'success')
     res.json({ status: 'imported', ...summary })
   } catch (err) {
     res.status(400).json({ error: (err as Error).message || 'Invalid backup archive' })
   }
 })
 
-api.get('/backups/:id/download', (req: Request, res: Response) => {
+api.get('/backups/:id/download', requirePermission('backups.create', auditService), (req: Request, res: Response) => {
   const found = backupManager.getSnapshotArchive(String(req.params.id))
   if (!found) {
     res.status(404).json({ error: 'backup archive not found' })
@@ -1825,16 +1881,18 @@ api.get('/backups/:id/download', (req: Request, res: Response) => {
   res.send(found.buffer)
 })
 
-api.delete('/backups/:id', (req: Request, res: Response) => {
+api.delete('/backups/:id', requirePermission('backups.restore', auditService), (req: AuthedRequest, res: Response) => {
   const deleted = backupManager.deleteSnapshot(String(req.params.id))
   if (!deleted) {
     res.status(404).json({ error: 'backup not found' })
     return
   }
+  savePlatformState()
+  recordAudit(req, 'backup.delete', String(req.params.id), 'success')
   res.json({ status: 'deleted' })
 })
 
-api.post('/backups/:id/restore', (req: Request, res: Response) => {
+api.post('/backups/:id/restore', requirePermission('backups.restore', auditService), (req: AuthedRequest, res: Response) => {
   const bkp = store.backups.find((b) => b.id === req.params.id)
   if (!bkp) {
     res.status(404).json({ error: 'backup not found' })
@@ -1842,6 +1900,8 @@ api.post('/backups/:id/restore', (req: Request, res: Response) => {
   }
   try {
     const summary = backupManager.restoreSnapshot(bkp.id)
+    savePlatformState()
+    recordAudit(req, 'backup.restore', bkp.id, 'success')
     res.json({
       status: 'restored',
       ...summary,
@@ -1854,7 +1914,7 @@ api.post('/backups/:id/restore', (req: Request, res: Response) => {
 
 // ==================== APP STORE, CENTRAL JSON REGISTRY & SERVICE ENGINE ====================
 
-api.get('/runtimes', async (req: Request, res: Response) => {
+api.get('/runtimes', requirePermission('applications.read', auditService), async (req: Request, res: Response) => {
   const report = await detectHostRuntimes(req.query.refresh === 'true')
   res.json(report)
 })
@@ -1909,7 +1969,7 @@ function filterAndSortTemplates(query: Request['query']) {
 }
 
 // Central JSON Registry API endpoints
-api.get('/registry', (req: Request, res: Response) => {
+api.get('/registry', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const registry = loadCentralRegistry()
   const counts: Record<string, number> = {}
   for (const appItem of registry.applications) {
@@ -1928,7 +1988,7 @@ api.get('/registry', (req: Request, res: Response) => {
   })
 })
 
-api.get('/registry/apps/:id', (req: Request, res: Response) => {
+api.get('/registry/apps/:id', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const appItem = getRegistryAppById(String(req.params.id))
   if (!appItem) {
     res.status(404).json({ error: 'Application not found in central registry' })
@@ -1937,7 +1997,7 @@ api.get('/registry/apps/:id', (req: Request, res: Response) => {
   res.json(appItem)
 })
 
-api.post('/registry/reload', (_req: Request, res: Response) => {
+api.post('/registry/reload', requirePermission('applications.create', auditService), (_req: Request, res: Response) => {
   const reloaded = reloadCentralRegistry()
   res.json({
     status: 'reloaded',
@@ -1948,7 +2008,7 @@ api.post('/registry/reload', (_req: Request, res: Response) => {
 })
 
 // Service Engine API endpoints (Node.js child_process supervision, PID tracking, logs, lifecycle & resources)
-api.get('/services', (req: Request, res: Response) => {
+api.get('/services', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const stateFilter = String(req.query.state || '').trim().toLowerCase()
   const list = serviceEngine.listServices().map(serializeServiceRecord)
   const filtered = stateFilter ? list.filter((s) => s.state === stateFilter) : list
@@ -1965,7 +2025,7 @@ api.get('/services', (req: Request, res: Response) => {
   })
 })
 
-api.post('/services', async (req: Request, res: Response) => {
+api.post('/services', requirePermission('applications.deploy', auditService), async (req: Request, res: Response) => {
   const templateId = typeof req.body?.templateId === 'string' ? req.body.templateId.trim() : ''
   const customDomain = typeof req.body?.domain === 'string' ? req.body.domain.trim() : ''
   if (customDomain && !isValidDomainName(customDomain)) {
@@ -2023,7 +2083,7 @@ api.post('/services', async (req: Request, res: Response) => {
   }
 })
 
-api.get('/services/:id', (req: Request, res: Response) => {
+api.get('/services/:id', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const svc = serviceEngine.getService(String(req.params.id))
   if (!svc) {
     res.status(404).json({ error: 'service not found' })
@@ -2035,7 +2095,7 @@ api.get('/services/:id', (req: Request, res: Response) => {
   })
 })
 
-api.get('/services/:id/logs', (req: Request, res: Response) => {
+api.get('/services/:id/logs', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const svc = serviceEngine.getService(String(req.params.id))
   if (!svc) {
     res.status(404).json({ error: 'service not found' })
@@ -2052,7 +2112,7 @@ api.get('/services/:id/logs', (req: Request, res: Response) => {
   })
 })
 
-api.get('/services/:id/metrics', (req: Request, res: Response) => {
+api.get('/services/:id/metrics', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const metrics = serviceEngine.getMetricsHistory(String(req.params.id))
   if (!metrics) {
     res.status(404).json({ error: 'service not found' })
@@ -2061,7 +2121,7 @@ api.get('/services/:id/metrics', (req: Request, res: Response) => {
   res.json(metrics)
 })
 
-api.post('/services/:id/start', async (req: Request, res: Response) => {
+api.post('/services/:id/start', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   try {
     const svc = await serviceEngine.startService(String(req.params.id))
     if (!svc) {
@@ -2074,7 +2134,7 @@ api.post('/services/:id/start', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/services/:id/stop', async (req: Request, res: Response) => {
+api.post('/services/:id/stop', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const svc = await serviceEngine.stopService(String(req.params.id))
   if (!svc) {
     res.status(404).json({ error: 'service not found' })
@@ -2083,7 +2143,7 @@ api.post('/services/:id/stop', async (req: Request, res: Response) => {
   res.json({ status: 'stopped', service: serializeServiceRecord(svc) })
 })
 
-api.post('/services/:id/restart', async (req: Request, res: Response) => {
+api.post('/services/:id/restart', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   try {
     const svc = await serviceEngine.restartService(String(req.params.id))
     if (!svc) {
@@ -2096,7 +2156,7 @@ api.post('/services/:id/restart', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/services/:id/health', async (req: Request, res: Response) => {
+api.post('/services/:id/health', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const health = await serviceEngine.runHealthCheck(String(req.params.id))
   if (!health) {
     res.status(404).json({ error: 'service not found' })
@@ -2105,7 +2165,7 @@ api.post('/services/:id/health', async (req: Request, res: Response) => {
   res.json(health)
 })
 
-api.delete('/services/:id', async (req: Request, res: Response) => {
+api.delete('/services/:id', requirePermission('applications.delete', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const svc = serviceEngine.getService(id)
   if (!svc) {
@@ -2122,15 +2182,15 @@ api.delete('/services/:id', async (req: Request, res: Response) => {
   res.json({ status: 'deleted' })
 })
 
-api.get('/templates', (req: Request, res: Response) => {
+api.get('/templates', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   res.json(filterAndSortTemplates(req.query))
 })
 
-api.get('/templates/search', (req: Request, res: Response) => {
+api.get('/templates/search', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   res.json(filterAndSortTemplates(req.query))
 })
 
-api.get('/templates/categories', (_req: Request, res: Response) => {
+api.get('/templates/categories', requirePermission('applications.read', auditService), (_req: Request, res: Response) => {
   const registry = loadCentralRegistry()
   const counts: Record<string, number> = {}
   for (const t of registry.applications) {
@@ -2143,7 +2203,7 @@ api.get('/templates/categories', (_req: Request, res: Response) => {
   })
 })
 
-api.get('/templates/:id/preflight', async (req: Request, res: Response) => {
+api.get('/templates/:id/preflight', requirePermission('applications.read', auditService), async (req: Request, res: Response) => {
   const tmpl = getTemplateById(String(req.params.id))
   if (!tmpl) {
     res.status(404).json({ error: 'template not found' })
@@ -2156,7 +2216,7 @@ api.get('/templates/:id/preflight', async (req: Request, res: Response) => {
   res.json(preflight)
 })
 
-api.get('/templates/:id', async (req: Request, res: Response) => {
+api.get('/templates/:id', requirePermission('applications.read', auditService), async (req: Request, res: Response) => {
   const tmpl = getTemplateById(String(req.params.id))
   if (!tmpl) {
     res.status(404).json({ error: 'template not found' })
@@ -2234,14 +2294,14 @@ async function handleTemplateInstallRequest(req: Request, res: Response) {
   }
 }
 
-api.post('/templates/:id/install', handleTemplateInstallRequest)
-api.post('/templates/:id/deploy', handleTemplateInstallRequest)
+api.post('/templates/:id/install', requirePermission('applications.create', auditService), handleTemplateInstallRequest)
+api.post('/templates/:id/deploy', requirePermission('applications.create', auditService), handleTemplateInstallRequest)
 
-api.get('/installations', (_req: Request, res: Response) => {
+api.get('/installations', requirePermission('applications.read', auditService), (_req: Request, res: Response) => {
   res.json(installerEngine.listAll().map(serializeInstallation))
 })
 
-api.get('/installations/:id', (req: Request, res: Response) => {
+api.get('/installations/:id', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   const id = String(req.params.id)
   const rec = installerEngine.installations.get(id) || installerEngine.findByName(id) || installerEngine.findByTemplateId(id)
   if (!rec) {
@@ -2251,7 +2311,7 @@ api.get('/installations/:id', (req: Request, res: Response) => {
   res.json(serializeInstallation(rec))
 })
 
-api.post('/installations/:id/start', async (req: Request, res: Response) => {
+api.post('/installations/:id/start', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   try {
     const rec = await installerEngine.startApp(String(req.params.id))
     if (!rec) {
@@ -2264,7 +2324,7 @@ api.post('/installations/:id/start', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/installations/:id/stop', async (req: Request, res: Response) => {
+api.post('/installations/:id/stop', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const rec = await installerEngine.stopApp(String(req.params.id))
   if (!rec) {
     res.status(404).json({ error: 'installation not found' })
@@ -2273,7 +2333,7 @@ api.post('/installations/:id/stop', async (req: Request, res: Response) => {
   res.json({ status: 'stopped', installation: serializeInstallation(rec) })
 })
 
-api.post('/installations/:id/restart', async (req: Request, res: Response) => {
+api.post('/installations/:id/restart', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   try {
     const rec = await installerEngine.restartApp(String(req.params.id))
     if (!rec) {
@@ -2286,7 +2346,7 @@ api.post('/installations/:id/restart', async (req: Request, res: Response) => {
   }
 })
 
-api.post('/installations/:id/health', async (req: Request, res: Response) => {
+api.post('/installations/:id/health', requirePermission('applications.restart', auditService), async (req: Request, res: Response) => {
   const health = await installerEngine.checkHealth(String(req.params.id))
   if (!health) {
     res.status(404).json({ error: 'installation not found' })
@@ -2295,7 +2355,7 @@ api.post('/installations/:id/health', async (req: Request, res: Response) => {
   res.json(health)
 })
 
-api.put('/installations/:id/env', (req: Request, res: Response) => {
+api.put('/installations/:id/env', requirePermission('applications.deploy', auditService), (req: Request, res: Response) => {
   const envObj: Record<string, string> = {}
   if (Array.isArray(req.body?.env)) {
     Object.assign(envObj, parseEnvMap(req.body.env))
@@ -2312,7 +2372,7 @@ api.put('/installations/:id/env', (req: Request, res: Response) => {
   res.json({ installation: serializeInstallation(rec) })
 })
 
-api.delete('/installations/:id', async (req: Request, res: Response) => {
+api.delete('/installations/:id', requirePermission('applications.delete', auditService), async (req: Request, res: Response) => {
   const id = String(req.params.id)
   const rec = installerEngine.installations.get(id) || installerEngine.findByName(id)
   if (!rec) {
@@ -2383,11 +2443,11 @@ async function executeGitDeployment(repo: (typeof store.gitRepos)[number]) {
   }
 }
 
-api.get('/git/repos', (_req: Request, res: Response) => {
+api.get('/git/repos', requirePermission('applications.read', auditService), (_req: Request, res: Response) => {
   res.json(store.gitRepos)
 })
 
-api.post('/git/repos', (req: Request, res: Response) => {
+api.post('/git/repos', requirePermission('applications.create', auditService), (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim()
   const url = String(req.body?.url || '').trim()
   if (!name || !url) {
@@ -2415,10 +2475,11 @@ api.post('/git/repos', (req: Request, res: Response) => {
   }
   store.gitRepos.push(repo)
   store.gitHistory.set(repo.id, [])
+  savePlatformState()
   res.json(repo)
 })
 
-api.put('/git/repos/:id', (req: Request, res: Response) => {
+api.put('/git/repos/:id', requirePermission('applications.create', auditService), (req: Request, res: Response) => {
   const repo = store.gitRepos.find((r) => r.id === req.params.id)
   if (!repo) {
     res.status(404).json({ error: 'repo not found' })
@@ -2443,10 +2504,11 @@ api.put('/git/repos/:id', (req: Request, res: Response) => {
     repo.domain = d
   }
   if (req.body?.port !== undefined) repo.port = Number(req.body.port) || undefined
+  savePlatformState()
   res.json(repo)
 })
 
-api.delete('/git/repos/:id', (req: Request, res: Response) => {
+api.delete('/git/repos/:id', requirePermission('applications.delete', auditService), (req: Request, res: Response) => {
   const idx = store.gitRepos.findIndex((r) => r.id === req.params.id)
   if (idx === -1) {
     res.status(404).json({ error: 'repo not found' })
@@ -2454,10 +2516,11 @@ api.delete('/git/repos/:id', (req: Request, res: Response) => {
   }
   store.gitRepos.splice(idx, 1)
   store.gitHistory.delete(String(req.params.id))
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
-api.post('/git/repos/:id/deploy', async (req: Request, res: Response) => {
+api.post('/git/repos/:id/deploy', requirePermission('applications.deploy', auditService), async (req: AuthedRequest, res: Response) => {
   const repo = store.gitRepos.find((r) => r.id === req.params.id)
   if (!repo) {
     res.status(404).json({ error: 'repo not found' })
@@ -2465,19 +2528,56 @@ api.post('/git/repos/:id/deploy', async (req: Request, res: Response) => {
   }
   try {
     const log = await executeGitDeployment(repo)
+    savePlatformState()
+    recordAudit(req, 'git.deploy', repo.name, 'success')
     res.json(log)
   } catch (err) {
+    savePlatformState()
+    recordAudit(req, 'git.deploy', repo.name, 'error', (err as Error).message)
     res.status(400).json({ error: (err as Error).message || 'Git deploy failed' })
   }
 })
 
-api.get('/git/repos/:id/history', (req: Request, res: Response) => {
+api.get('/git/repos/:id/history', requirePermission('applications.read', auditService), (req: Request, res: Response) => {
   res.json(store.gitHistory.get(String(req.params.id)) || [])
 })
 
-api.post('/git/webhook', async (req: Request, res: Response) => {
-  const repoId = String(req.body?.repo_id || req.query?.repo_id || '')
-  const target = (repoId ? store.gitRepos.find((r) => r.id === repoId) : store.gitRepos[0])
+function verifyWebhookSignature(req: AuthedRequest): { ok: boolean; method?: string } {
+  const secret = store.settings.webhookSecret
+  if (!secret) return { ok: false }
+
+  const sigHeader = String(req.headers['x-hub-signature-256'] || '').trim()
+  if (sigHeader) {
+    const rawPayload = req.rawBody || Buffer.from(JSON.stringify(req.body || {}), 'utf8')
+    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawPayload).digest('hex')
+    if (safeEqualStrings(sigHeader.toLowerCase(), expected.toLowerCase())) {
+      return { ok: true, method: 'x-hub-signature-256' }
+    }
+    return { ok: false }
+  }
+
+  const secretHeader = String(
+    req.headers['x-kathal-webhook-secret'] || req.headers['x-gitlab-token'] || ''
+  ).trim()
+  if (secretHeader && safeEqualStrings(secretHeader, secret)) {
+    return { ok: true, method: 'webhook-secret-header' }
+  }
+
+  return { ok: false }
+}
+
+async function handleWebhookTrigger(req: AuthedRequest, res: Response, forcedRepoId?: string) {
+  const sigCheck = verifyWebhookSignature(req)
+  if (!sigCheck.ok) {
+    recordAudit(req, 'git.webhook', forcedRepoId || String(req.body?.repo_id || 'unknown'), 'denied', 'invalid_signature')
+    res.status(401).json({
+      error: 'Webhook authentication failed. Provide valid X-Hub-Signature-256 or X-Kathal-Webhook-Secret header.',
+    })
+    return
+  }
+
+  const repoId = forcedRepoId || String(req.body?.repo_id || req.query?.repo_id || '')
+  const target = repoId ? store.gitRepos.find((r) => r.id === repoId) : store.gitRepos[0]
   if (!target) {
     res.status(404).json({ error: 'no repository configured for webhook' })
     return
@@ -2488,45 +2588,74 @@ api.post('/git/webhook', async (req: Request, res: Response) => {
   }
   try {
     const log = await executeGitDeployment(target)
+    savePlatformState()
+    recordAudit(req, 'git.webhook', target.name, 'success', sigCheck.method)
     res.json({ repo_id: target.id, status: 'deployed', ...log })
   } catch (err) {
+    savePlatformState()
+    recordAudit(req, 'git.webhook', target.name, 'error', (err as Error).message)
     res.status(400).json({ error: (err as Error).message || 'Webhook deploy failed' })
   }
+}
+
+api.post('/git/webhook', async (req: AuthedRequest, res: Response) => {
+  await handleWebhookTrigger(req, res)
+})
+
+api.post('/webhooks/git/:id', async (req: AuthedRequest, res: Response) => {
+  await handleWebhookTrigger(req, res, String(req.params.id))
 })
 
 // ==================== WEB TERMINAL ====================
 
-const terminalSessions = new Map<string, { id: string; cols: number; rows: number; cwd: string }>()
+const terminalGateway = new TerminalGateway(authService, auditService, attachTerminalSession)
 
-api.post('/terminal/sessions', (req: Request, res: Response) => {
-  const id = String(req.body?.id || `term-${Date.now()}`)
-  const cols = Number(req.body?.cols) || 120
-  const rows = Number(req.body?.rows) || 30
-  const session = { id, cols, rows, cwd: '/data' }
-  terminalSessions.set(id, session)
-  res.json(session)
+api.post('/terminal/sessions', requirePermission('terminal.access', auditService), (req: AuthedRequest, res: Response) => {
+  try {
+    const ip = req.ip || req.socket?.remoteAddress || '127.0.0.1'
+    const result = terminalGateway.createSession({
+      id: typeof req.body?.id === 'string' ? req.body.id : undefined,
+      cols: Number(req.body?.cols) || 120,
+      rows: Number(req.body?.rows) || 30,
+      userId: req.auth!.user.id,
+      authSessionId: req.auth!.sessionId,
+      email: req.auth!.user.email,
+      ip,
+      correlationId: req.requestId || '',
+    })
+    res.json(result)
+  } catch (err) {
+    const e = err as Error & { status?: number }
+    res.status(e.status || 400).json({ error: e.message || 'Failed to create terminal session' })
+  }
 })
 
-api.delete('/terminal/sessions/:id', (req: Request, res: Response) => {
-  terminalSessions.delete(String(req.params.id))
-  res.json({ status: 'closed' })
+api.delete('/terminal/sessions/:id', requirePermission('terminal.access', auditService), (req: AuthedRequest, res: Response) => {
+  try {
+    const canManageAll = req.auth!.user.roles.includes('Owner') || req.auth!.user.roles.includes('Administrator')
+    terminalGateway.deleteSession(String(req.params.id), req.auth!.user.id, canManageAll)
+    res.json({ status: 'closed' })
+  } catch (err) {
+    const e = err as Error & { status?: number }
+    res.status(e.status || 403).json({ error: e.message || 'Forbidden' })
+  }
 })
 
 // ==================== MONITORING ====================
 
-api.get('/monitoring/current', (_req: Request, res: Response) => {
+api.get('/monitoring/current', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   const runningApps = getAllRunningForMetrics()
   const latest = store.monitoringHistory[store.monitoringHistory.length - 1]
   res.json(latest || store.collectMonitoringSample(Date.now(), runningApps))
 })
 
-api.get('/monitoring/history', (_req: Request, res: Response) => {
+api.get('/monitoring/history', requirePermission('dashboard.read', auditService), (_req: Request, res: Response) => {
   res.json(store.monitoringHistory)
 })
 
 // ==================== LOGS ====================
 
-api.get('/logs/containers', (_req: Request, res: Response) => {
+api.get('/logs/containers', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(
     listAllSerializedWorkload().map((s) => ({
       id: s.id,
@@ -2537,7 +2666,7 @@ api.get('/logs/containers', (_req: Request, res: Response) => {
   )
 })
 
-api.get('/logs', (req: Request, res: Response) => {
+api.get('/logs', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const containerId = String(req.query.container || '')
   const tail = Number(req.query.tail) || 100
   const filter = String(req.query.filter || '')
@@ -2545,7 +2674,7 @@ api.get('/logs', (req: Request, res: Response) => {
   res.json(appLogs.length > 0 ? appLogs : nativeProcesses.getLogs(containerId, tail, filter))
 })
 
-api.post('/logs/search', (req: Request, res: Response) => {
+api.post('/logs/search', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const containerId = String(req.body?.container || '')
   const query = String(req.body?.query || '')
   const limit = Number(req.body?.limit) || 500
@@ -2736,17 +2865,17 @@ function serializeComposeProject(p: (typeof store.composeProjects)[number]) {
   }
 }
 
-api.get('/compose', (_req: Request, res: Response) => {
+api.get('/compose', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   syncDiscoveredComposeFiles()
   res.json(store.composeProjects.map(serializeComposeProject))
 })
 
-api.post('/compose/scan', (_req: Request, res: Response) => {
+api.post('/compose/scan', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   syncDiscoveredComposeFiles()
   res.json(store.composeProjects.map(serializeComposeProject))
 })
 
-api.post('/compose', (req: Request, res: Response) => {
+api.post('/compose', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim()
   const config = String(req.body?.config || '')
   if (!name) {
@@ -2766,16 +2895,17 @@ api.post('/compose', (req: Request, res: Response) => {
   store.composeProjects.push(project)
   store.ensureParentDirs(filePath)
   store.files.set(filePath, { isDir: false, content: config, updatedAt: project.updatedAt })
+  savePlatformState()
   res.json(serializeComposeProject(project))
 })
 
-api.post('/compose/validate', (req: Request, res: Response) => {
+api.post('/compose/validate', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   const config = String(req.body?.config || '')
   const services = extractComposeServices(config)
   res.json({ valid: services.length > 0, services })
 })
 
-api.get('/compose/:name', (req: Request, res: Response) => {
+api.get('/compose/:name', requirePermission('containers.read', auditService), (req: Request, res: Response) => {
   syncDiscoveredComposeFiles()
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
@@ -2798,13 +2928,14 @@ function handleUpdateCompose(req: Request, res: Response) {
   if (p.filePath && store.files.has(p.filePath)) {
     store.files.set(p.filePath, { isDir: false, content: config, updatedAt: p.updatedAt })
   }
+  savePlatformState()
   res.json(serializeComposeProject(p))
 }
 
-api.put('/compose/:name', handleUpdateCompose)
-api.post('/compose/:name', handleUpdateCompose)
+api.put('/compose/:name', requirePermission('containers.manage', auditService), handleUpdateCompose)
+api.post('/compose/:name', requirePermission('containers.manage', auditService), handleUpdateCompose)
 
-api.delete('/compose/:name', async (req: Request, res: Response) => {
+api.delete('/compose/:name', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const name = String(req.params.name)
   const idx = store.composeProjects.findIndex((item) => item.name === name)
   if (idx === -1) {
@@ -2822,6 +2953,7 @@ api.delete('/compose/:name', async (req: Request, res: Response) => {
     }
   }
   store.composeProjects.splice(idx, 1)
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
@@ -2841,10 +2973,11 @@ async function startComposeProject(p: (typeof store.composeProjects)[number]) {
   }
   p.status = 'running'
   p.updatedAt = new Date().toISOString()
+  savePlatformState()
   return { ...serializeComposeProject(p), deployedCount }
 }
 
-api.post('/compose/:name/start', async (req: Request, res: Response) => {
+api.post('/compose/:name/start', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
@@ -2853,7 +2986,7 @@ api.post('/compose/:name/start', async (req: Request, res: Response) => {
   res.json(await startComposeProject(p))
 })
 
-api.post('/compose/:name/deploy', async (req: Request, res: Response) => {
+api.post('/compose/:name/deploy', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
@@ -2862,7 +2995,7 @@ api.post('/compose/:name/deploy', async (req: Request, res: Response) => {
   res.json(await startComposeProject(p))
 })
 
-api.post('/compose/:name/restart', async (req: Request, res: Response) => {
+api.post('/compose/:name/restart', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
@@ -2872,7 +3005,7 @@ api.post('/compose/:name/restart', async (req: Request, res: Response) => {
   res.json({ ...result, restarted: true })
 })
 
-api.post('/compose/:name/stop', async (req: Request, res: Response) => {
+api.post('/compose/:name/stop', requirePermission('containers.manage', auditService), async (req: Request, res: Response) => {
   const p = store.composeProjects.find((item) => item.name === req.params.name)
   if (!p) {
     res.status(404).json({ error: 'project not found' })
@@ -2886,16 +3019,27 @@ api.post('/compose/:name/stop', async (req: Request, res: Response) => {
   }
   p.status = 'stopped'
   p.updatedAt = new Date().toISOString()
+  savePlatformState()
   res.json(serializeComposeProject(p))
 })
 
 // ==================== ENV ====================
 
-api.get('/env', (_req: Request, res: Response) => {
-  res.json(store.envVars)
+function serializeEnvVar(item: (typeof store.envVars)[number]) {
+  return {
+    key: item.key,
+    value: item.secret ? '' : item.value,
+    hasValue: Boolean(item.value),
+    description: item.description,
+    secret: item.secret,
+  }
+}
+
+api.get('/env', requirePermission('secrets.read', auditService), (_req: Request, res: Response) => {
+  res.json(store.envVars.map(serializeEnvVar))
 })
 
-api.post('/env', (req: Request, res: Response) => {
+api.post('/env', requirePermission('secrets.reveal', auditService), (req: AuthedRequest, res: Response) => {
   const key = String(req.body?.key || '').trim()
   if (!key) {
     res.status(400).json({ error: 'key is required' })
@@ -2910,22 +3054,40 @@ api.post('/env', (req: Request, res: Response) => {
   }
   if (existingIdx >= 0) store.envVars[existingIdx] = item
   else store.envVars.push(item)
+  savePlatformState()
+  recordAudit(req, 'env.save', key, 'success', item.secret ? 'secret' : 'plain')
   res.json({ status: 'created' })
 })
 
-api.delete('/env/:key', (req: Request, res: Response) => {
-  const idx = store.envVars.findIndex((e) => e.key === req.params.key)
-  if (idx >= 0) store.envVars.splice(idx, 1)
+api.post('/env/:key/reveal', requirePermission('secrets.reveal', auditService), (req: AuthedRequest, res: Response) => {
+  const key = decodeURIComponent(String(req.params.key))
+  const item = store.envVars.find((e) => e.key === key)
+  if (!item) {
+    res.status(404).json({ error: 'environment variable not found' })
+    return
+  }
+  recordAudit(req, 'env.reveal', key, 'success')
+  res.json({ key: item.key, value: item.value })
+})
+
+api.delete('/env/:key', requirePermission('secrets.reveal', auditService), (req: AuthedRequest, res: Response) => {
+  const key = decodeURIComponent(String(req.params.key))
+  const idx = store.envVars.findIndex((e) => e.key === key)
+  if (idx >= 0) {
+    store.envVars.splice(idx, 1)
+    savePlatformState()
+    recordAudit(req, 'env.delete', key, 'success')
+  }
   res.json({ status: 'deleted' })
 })
 
 // ==================== NETWORK & VOLUMES ====================
 
-api.get('/network', (_req: Request, res: Response) => {
+api.get('/network', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(store.networks)
 })
 
-api.post('/network', (req: Request, res: Response) => {
+api.post('/network', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim()
   if (!name) {
     res.status(400).json({ error: 'network name is required' })
@@ -2942,22 +3104,25 @@ api.post('/network', (req: Request, res: Response) => {
     containers: [],
   }
   store.networks.push(net)
+  savePlatformState()
   res.json(net)
 })
 
-api.post('/network/prune', (_req: Request, res: Response) => {
+api.post('/network/prune', requirePermission('containers.manage', auditService), (_req: Request, res: Response) => {
   const before = store.networks.length
   store.networks = store.networks.filter((n) => n.name === 'bridge' || n.containers.length > 0)
+  savePlatformState()
   res.json({ networks_deleted: before - store.networks.length })
 })
 
-api.delete('/network/:name', (req: Request, res: Response) => {
+api.delete('/network/:name', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const idx = store.networks.findIndex((n) => n.name === req.params.name)
   if (idx === -1) {
     res.status(404).json({ error: 'network not found' })
     return
   }
   store.networks.splice(idx, 1)
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
@@ -2970,7 +3135,7 @@ function getVolumeUsage(vol: (typeof store.volumes)[number]) {
   return { inUse: usedBy.length > 0, containers: usedBy }
 }
 
-api.get('/volumes', (_req: Request, res: Response) => {
+api.get('/volumes', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(
     store.volumes.map((v) => ({
       ...v,
@@ -2979,7 +3144,7 @@ api.get('/volumes', (_req: Request, res: Response) => {
   )
 })
 
-api.post('/volumes', (req: Request, res: Response) => {
+api.post('/volumes', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim() || store.newId('vol')
   if (store.volumes.some((v) => v.name === name)) {
     res.status(409).json({ error: `volume "${name}" already exists` })
@@ -2994,14 +3159,16 @@ api.post('/volumes', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   }
   store.volumes.push(vol)
+  savePlatformState()
   res.json({ ...vol, ...getVolumeUsage(vol) })
 })
 
-api.post('/volumes/prune', (_req: Request, res: Response) => {
+api.post('/volumes/prune', requirePermission('containers.manage', auditService), (_req: Request, res: Response) => {
   const unused = store.volumes.filter((v) => !getVolumeUsage(v).inUse)
   const reclaimed = unused.reduce((sum, v) => sum + (v.sizeBytes || 0), 0)
   const deletedNames = unused.map((v) => v.name)
   store.volumes = store.volumes.filter((v) => getVolumeUsage(v).inUse)
+  savePlatformState()
   res.json({
     volumes_deleted: unused.length,
     deleted_names: deletedNames,
@@ -3009,7 +3176,7 @@ api.post('/volumes/prune', (_req: Request, res: Response) => {
   })
 })
 
-api.delete('/volumes/:name', (req: Request, res: Response) => {
+api.delete('/volumes/:name', requirePermission('containers.manage', auditService), (req: Request, res: Response) => {
   const name = decodeURIComponent(String(req.params.name))
   const idx = store.volumes.findIndex((v) => v.name === name)
   if (idx === -1) {
@@ -3024,6 +3191,7 @@ api.delete('/volumes/:name', (req: Request, res: Response) => {
     return
   }
   store.volumes.splice(idx, 1)
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
@@ -3044,11 +3212,11 @@ function serializeRegistry(r: (typeof store.registries)[number]) {
   }
 }
 
-api.get('/registries', (_req: Request, res: Response) => {
+api.get('/registries', requirePermission('containers.read', auditService), (_req: Request, res: Response) => {
   res.json(store.registries.map(serializeRegistry))
 })
 
-api.post('/registries', (req: Request, res: Response) => {
+api.post('/registries', requirePermission('plugins.manage', auditService), (req: Request, res: Response) => {
   const name = String(req.body?.name || '').trim()
   const registryUrl = normalizeRegistryHost(String(req.body?.registryUrl || ''))
   const username = String(req.body?.username || '').trim()
@@ -3071,10 +3239,12 @@ api.post('/registries', (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   }
   store.registries.unshift(reg)
+  savePlatformState()
+  recordAudit(req as AuthedRequest, 'registry.create', `${name} (${registryUrl})`, 'success')
   res.json(serializeRegistry(reg))
 })
 
-api.put('/registries/:id', (req: Request, res: Response) => {
+api.put('/registries/:id', requirePermission('plugins.manage', auditService), (req: Request, res: Response) => {
   const reg = store.registries.find((r) => r.id === req.params.id)
   if (!reg) {
     res.status(404).json({ error: 'registry not found' })
@@ -3091,10 +3261,11 @@ api.put('/registries/:id', (req: Request, res: Response) => {
     reg.password = req.body.password
   }
   if (typeof req.body?.email === 'string') reg.email = req.body.email.trim()
+  savePlatformState()
   res.json(serializeRegistry(reg))
 })
 
-api.post('/registries/:id/test', (req: Request, res: Response) => {
+api.post('/registries/:id/test', requirePermission('plugins.manage', auditService), (req: Request, res: Response) => {
   const reg = store.registries.find((r) => r.id === req.params.id)
   if (!reg) {
     res.status(404).json({ error: 'registry not found' })
@@ -3107,6 +3278,7 @@ api.post('/registries/:id/test', (req: Request, res: Response) => {
   }
   reg.status = 'connected'
   reg.lastUsedAt = new Date().toISOString()
+  savePlatformState()
   res.json({
     ok: true,
     message: `Login succeeded for ${reg.username}@${reg.registryUrl}`,
@@ -3114,13 +3286,14 @@ api.post('/registries/:id/test', (req: Request, res: Response) => {
   })
 })
 
-api.delete('/registries/:id', (req: Request, res: Response) => {
+api.delete('/registries/:id', requirePermission('plugins.manage', auditService), (req: Request, res: Response) => {
   const idx = store.registries.findIndex((r) => r.id === req.params.id)
   if (idx === -1) {
     res.status(404).json({ error: 'registry not found' })
     return
   }
   store.registries.splice(idx, 1)
+  savePlatformState()
   res.json({ status: 'deleted' })
 })
 
@@ -3245,8 +3418,15 @@ function runShellCommand(cmdLine: string, cwd: string): { output: string; nextCw
   }
 }
 
-function attachTerminalSession(ws: WebSocket, sessionId: string) {
-  const session = terminalSessions.get(sessionId) || { id: sessionId, cols: 120, rows: 30, cwd: '/data' }
+function attachTerminalSession(
+  ws: WebSocket,
+  sessionId: string,
+  initialCwd = '/data',
+  updateCwd?: (next: string) => void
+) {
+  let cwd = initialCwd
+  let cols = 120
+  let rows = 30
   let lineBuffer = ''
   let username = 'kathal'
   try {
@@ -3254,7 +3434,7 @@ function attachTerminalSession(ws: WebSocket, sessionId: string) {
   } catch {
     username = process.env.USER || process.env.USERNAME || 'kathal'
   }
-  const prompt = () => `${username}@kathal:${session.cwd}$ `
+  const prompt = () => `${username}@kathal:${cwd}$ `
 
   ws.send(`\x1b[1;32mKATHAL OS Local Terminal\x1b[0m (${getPlatformLabel()} · session ${sessionId})\r\nType 'help' for available commands.\r\n\r\n${prompt()}`)
 
@@ -3263,8 +3443,8 @@ function attachTerminalSession(ws: WebSocket, sessionId: string) {
     try {
       const parsed = JSON.parse(raw.toString()) as { type?: string; data?: string; cols?: number; rows?: number }
       if (parsed.type === 'resize') {
-        session.cols = parsed.cols || session.cols
-        session.rows = parsed.rows || session.rows
+        cols = parsed.cols || cols
+        rows = parsed.rows || rows
         return
       }
       if (parsed.type === 'input') {
@@ -3277,8 +3457,9 @@ function attachTerminalSession(ws: WebSocket, sessionId: string) {
     for (const ch of input) {
       if (ch === '\r' || ch === '\n') {
         ws.send('\r\n')
-        const result = runShellCommand(lineBuffer, session.cwd)
-        session.cwd = result.nextCwd
+        const result = runShellCommand(lineBuffer, cwd)
+        cwd = result.nextCwd
+        updateCwd?.(cwd)
         if (result.output) {
           ws.send(result.clear ? result.output : result.output.replace(/\n/g, '\r\n') + '\r\n')
         }
@@ -3304,7 +3485,9 @@ function attachTerminalSession(ws: WebSocket, sessionId: string) {
 
 const webDistDir = path.join(__dirname, 'web', 'dist')
 
-async function startServer() {
+async function startServer(listenPort = PORT): Promise<{ app: express.Express; server: http.Server }> {
+  await bootstrapPlatform()
+
   const isProd = process.env.NODE_ENV === 'production'
   if (!isProd && fs.existsSync(path.join(__dirname, 'web', 'vite.config.js'))) {
     try {
@@ -3336,31 +3519,33 @@ async function startServer() {
   const wss = new WebSocketServer({ noServer: true })
 
   server.on('upgrade', (request, socket, head) => {
-    const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
-    const match = /^\/api\/v1\/terminal\/ws\/([^/]+)$/.exec(reqUrl.pathname)
-    if (!match) {
-      socket.destroy()
-      return
-    }
-    const token = reqUrl.searchParams.get('token') || ''
-    try {
-      jwt.verify(token, JWT_SECRET)
-    } catch {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
-      socket.destroy()
-      return
-    }
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      attachTerminalSession(ws, match[1])
+    terminalGateway.handleUpgrade(request, socket, head, wss)
+  })
+
+  await new Promise<void>((resolve) => {
+    server.listen(listenPort, '0.0.0.0', () => {
+      console.log(`KATHAL OS listening on http://0.0.0.0:${listenPort}`)
+      resolve()
     })
   })
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`KATHAL OS listening on http://0.0.0.0:${PORT}`)
-  })
+  const gracefulShutdown = () => {
+    clearInterval(monitoringTimer)
+    server.close(() => {
+      dbManager.close()
+    })
+  }
+  process.once('SIGTERM', gracefulShutdown)
+  process.once('SIGINT', gracefulShutdown)
+
+  return { app, server }
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start KATHAL OS server:', err)
-  process.exit(1)
-})
+export { app, startServer, dbManager, authService, rbacService, vault, auditService, fleetService }
+
+if (process.env.KATHAL_DISABLE_AUTOSTART !== '1') {
+  startServer().catch((err) => {
+    console.error('Failed to start KATHAL OS server:', err)
+    process.exit(1)
+  })
+}

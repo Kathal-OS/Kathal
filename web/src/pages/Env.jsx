@@ -52,6 +52,24 @@ export default function Env() {
     }
   }
 
+  async function handleToggleReveal(env) {
+    if (revealed[env.key] !== undefined) {
+      setRevealed((prev) => {
+        const next = { ...prev }
+        delete next[env.key]
+        return next
+      })
+      return
+    }
+    setFeedback(null)
+    try {
+      const res = await apiPost('/env/' + encodeURIComponent(env.key) + '/reveal', {})
+      setRevealed((prev) => ({ ...prev, [env.key]: res.value ?? '' }))
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to reveal secret' })
+    }
+  }
+
   return (
     <div className="p-8">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
@@ -101,7 +119,8 @@ export default function Env() {
         ) : (
           <div className="divide-y divide-gray-800">
             {globalEnv.map((env) => {
-              const isRevealed = Boolean(revealed[env.key])
+              const isRevealed = revealed[env.key] !== undefined
+              const displayValue = env.secret ? (isRevealed ? revealed[env.key] : '••••••••••••') : env.value
               return (
                 <div key={env.key} className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5">
                   <div className="min-w-0 flex-1">
@@ -120,11 +139,12 @@ export default function Env() {
 
                   <div className="flex items-center gap-2">
                     <code className="bg-gray-950 border border-gray-800 px-3 py-1 rounded text-xs font-mono text-gray-300 max-w-xs truncate">
-                      {env.secret && !isRevealed ? '••••••••••••' : env.value}
+                      {displayValue}
                     </code>
                     {env.secret && (
                       <button
-                        onClick={() => setRevealed((prev) => ({ ...prev, [env.key]: !prev[env.key] }))}
+                        type="button"
+                        onClick={() => handleToggleReveal(env)}
                         className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs text-gray-300"
                       >
                         {isRevealed ? 'Hide' : 'Reveal'}

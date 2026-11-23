@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { apiFetch, apiPost, getAuthToken } from '../hooks/useApi'
+import { apiFetch, apiPost } from '../hooks/useApi'
 
 export default function Terminal() {
   const termContainerRef = useRef(null)
@@ -88,13 +88,13 @@ export default function Terminal() {
     setError(null)
     try {
       const result = await apiPost('/terminal/sessions', { cols: 120, rows: 30 })
-      const token = getAuthToken() || ''
+      const ticket = result.wsTicket || ''
       const id = result.id || result.session_id
       sessionIdRef.current = id
       setSessionId(id)
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?token=${encodeURIComponent(token)}`
+      const wsUrl = `${proto}//${window.location.host}/api/v1/terminal/ws/${id}?ticket=${encodeURIComponent(ticket)}`
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 

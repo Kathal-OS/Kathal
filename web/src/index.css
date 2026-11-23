@@ -3,14 +3,34 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --kathal-canvas: #f4f8f3;
+    --kathal-surface: #ffffff;
+    --kathal-text: #101a10;
+    --kathal-muted: #455c3e;
+    --kathal-scroll-track: #eaf2e6;
+    --kathal-scroll-thumb: #b1c9a8;
+    --kathal-scroll-hover: #8ba881;
+  }
+
+  html.dark {
+    --kathal-canvas: #080c08;
+    --kathal-surface: #101a10;
+    --kathal-text: #eaf2e6;
+    --kathal-muted: #8ba881;
+    --kathal-scroll-track: #080c08;
+    --kathal-scroll-thumb: #1d2b1a;
+    --kathal-scroll-hover: #2d3f28;
+  }
+
   html {
     color-scheme: dark;
   }
 
   body {
     font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
-    background-color: #080c08;
-    color: #eaf2e6;
+    background-color: var(--kathal-canvas);
+    color: var(--kathal-text);
     letter-spacing: 0.005em;
   }
 
@@ -25,6 +45,15 @@
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible {
+    outline: 2px solid #28a138;
+    outline-offset: 2px;
+  }
+
+  html.dark button:focus-visible,
+  html.dark a:focus-visible,
+  html.dark input:focus-visible,
+  html.dark select:focus-visible,
+  html.dark textarea:focus-visible {
     outline: 2px solid #facc15;
     outline-offset: 2px;
   }
@@ -37,16 +66,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #080c08;
+  background: var(--kathal-scroll-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1d2b1a;
+  background: var(--kathal-scroll-thumb);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2d3f28;
+  background: var(--kathal-scroll-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -12,94 +12,61 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  lint:
-    name: Lint & Vet
+  lint-typecheck:
+    name: TypeCheck & Lint
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc make
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - name: Run go vet
-        run: go vet ./...
-      - name: Run gofmt
-        run: |
-          gofmt -l . | grep -v vendor
-          test -z "$(gofmt -l . | grep -v vendor)"
-
-  build:
-    name: Build Binary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc make
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - name: Build
-        run: |
-          go mod tidy
-          CGO_ENABLED=1 go build -v -ldflags="-s -w" -o kathal ./cmd/kathal/
-      - name: Verify binary
-        run: |
-          ls -la kathal
-          file kathal
-
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - name: Check for test files
-        id: check_tests
-        run: |
-          TEST_FILES=$(find . -name '*_test.go' 2>/dev/null | head -1)
-          if [ -z "$TEST_FILES" ]; then
-            echo "No test files found, skipping tests"
-            echo "has_tests=false" >> $GITHUB_OUTPUT
-          else
-            echo "has_tests=true" >> $GITHUB_OUTPUT
-          fi
-      - name: Run tests
-        if: steps.check_tests.outputs.has_tests == 'true'
-        run: go test -short ./...
-      - name: Skip tests (no test files)
-        if: steps.check_tests.outputs.has_tests == 'false'
-        run: echo "No test files found, skipping test execution"
-
-  frontend:
-    name: Frontend Build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Build
+      - name: Run TypeScript type check
+        run: npm run lint
+
+  test:
+    name: Unit & API Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint-typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Node.js test suite
+        run: npm test
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high || true
+
+  build:
+    name: Frontend & Server Build
+    runs-on: ubuntu-latest
+    needs: [lint-typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build production frontend and verify types
         run: npm run build
+      - name: Verify build output
+        run: |
+          test -f web/dist/index.html
+          ls -lh web/dist/
 
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, build, test, frontend]
+    needs: [lint-typecheck, test, build]
     permissions:
       contents: read
       packages: write
@@ -132,41 +99,32 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    name: Release
+    name: Release Bundle
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, test, frontend, docker]
+    needs: [lint-typecheck, test, build]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc make
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v4
         with:
-          go-version: '1.22'
-      - name: Build cross-platform binaries
+          node-version: '22'
+          cache: 'npm'
+      - name: Install dependencies & build
         run: |
-          for GOOS in linux windows darwin; do
-            for GOARCH in amd64 arm64; do
-              if [ "$GOOS" = "windows" ] && [ "$GOARCH" = "arm64" ]; then
-                continue
-              fi
-              EXT=""
-              [ "$GOOS" = "windows" ] && EXT=".exe"
-              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="-s -w" -o dist/kathal-${GOOS}-${GOARCH}${EXT} ./cmd/kathal/
-            done
-          done
-          ls -la dist/
-      - name: Create checksums
+          npm ci
+          npm test
+          npm run build
+      - name: Package portable runtime tarball
         run: |
-          cd dist
-          sha256sum * > checksums.txt
-          cat checksums.txt
+          mkdir -p dist
+          tar -czf dist/kathal-os-${{ github.ref_name }}-portable.tar.gz \
+            --exclude=node_modules --exclude=.git --exclude=data/backups --exclude=data/apps \
+            package.json package-lock.json tsconfig.json server.ts src/ electron/ scripts/ deploy/ web/dist/ .env.example README.md
+          cd dist && sha256sum * > checksums.txt
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
